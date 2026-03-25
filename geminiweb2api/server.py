@@ -1,5 +1,5 @@
 from typing import List, Optional, Union, Dict, Any
-from fastapi import FastAPI, HTTPException, Depends, Header, Request, status
+from fastapi import FastAPI, HTTPException, Depends, Header, Request, status, UploadFile, File, Form
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, PlainTextResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
@@ -62,10 +62,13 @@ if IS_VERCEL and DATA_DIR == ".":
     DATA_DIR = "/tmp/geminiweb2api-data"
 os.makedirs(DATA_DIR, exist_ok=True)
 DATA_FILE = os.path.join(DATA_DIR, "cookies.json")
+UPLOADS_DIR = os.path.join(DATA_DIR, "uploads")
+os.makedirs(UPLOADS_DIR, exist_ok=True)
 COOKIE_REFRESH_INTERVAL = 900  # 15 minutes
 COOKIE_HEALTHCHECK_INTERVAL = 21600  # 6 hours
 COOKIE_COOLDOWN_SECONDS = 300
 DATA_CACHE_TTL_SECONDS = 5
+INLINE_FILE_MAX_BYTES = 5 * 1024 * 1024
 data_lock = threading.Lock()
 data_cache: Dict[str, Any] = {"value": None, "expires_at": 0.0}
 
@@ -104,7 +107,18 @@ def invalidate_data_cache():
 
 def load_data(force_refresh: bool = False) -> Dict:
     """Load data from JSON file, migrating old format if needed"""
-    default = {"cookies": {}, "settings": {"admin_username": "admin", "admin_password": "admin", "api_key": "sk-123456", "image_mode": "url", "base_url": "", "plugin_token": ""}}
+    default = {
+        "cookies": {},
+        "files": {},
+        "settings": {
+            "admin_username": "admin",
+            "admin_password": "admin",
+            "api_key": "sk-123456",
+            "image_mode": "url",
+            "base_url": "",
+            "plugin_token": ""
+        }
+    }
     now = time.time()
 
     if not force_refresh and data_cache["value"] is not None and data_cache["expires_at"] > now:
@@ -175,6 +189,9 @@ def get_settings() -> Dict:
 def get_cookies() -> Dict:
     return load_data().get("cookies", {})
 
+def get_files() -> Dict:
+    return load_data().get("files", {})
+
 def normalize_cookie_record(cookie_id: str, cookie_data: Dict[str, Any]) -> Dict[str, Any]:
     """Normalize cookie metadata to support server-side keepalive."""
     cookie_data.setdefault("parsed", {})
@@ -198,6 +215,18 @@ def normalize_cookie_record(cookie_id: str, cookie_data: Dict[str, Any]) -> Dict
     if cookie_data.get("psid"):
         cookie_data["cookie_id"] = cookie_id
     return cookie_data
+
+def normalize_file_record(file_id: str, file_data: Dict[str, Any]) -> Dict[str, Any]:
+    file_data.setdefault("id", file_id)
+    file_data.setdefault("object", "file")
+    file_data.setdefault("bytes", 0)
+    file_data.setdefault("created_at", int(time.time()))
+    file_data.setdefault("filename", "")
+    file_data.setdefault("purpose", "assistants")
+    file_data.setdefault("content_type", "application/octet-stream")
+    file_data.setdefault("path", "")
+    file_data.setdefault("content_b64", "")
+    return file_data
 
 def build_full_cookie_dict(cookie_data: Dict[str, Any]) -> Dict[str, str]:
     full_cookies: Dict[str, str] = {}
@@ -402,11 +431,15 @@ def finalize_loaded_data(data: Dict[str, Any], default: Dict[str, Any]) -> Dict[
 
     if "cookies" not in data:
         data["cookies"] = {}
+    if "files" not in data:
+        data["files"] = {}
     if "settings" not in data:
         data["settings"] = default["settings"]
 
     for cookie_id, cookie_data in data["cookies"].items():
         normalize_cookie_record(cookie_id, cookie_data)
+    for file_id, file_data in data["files"].items():
+        normalize_file_record(file_id, file_data)
 
     data = apply_env_bootstrap(data)
 
@@ -497,6 +530,97 @@ def upstash_get_json() -> Optional[Dict[str, Any]]:
 
 def upstash_set_json(data: Dict[str, Any]):
     execute_upstash_command(["SET", get_upstash_data_key(), json.dumps(data, ensure_ascii=False)])
+
+def sanitize_filename(name: str) -> str:
+    safe = os.path.basename(name or "").strip()
+    return safe or "upload.bin"
+
+def get_file_extension(filename: str, content_type: str = "") -> str:
+    _, ext = os.path.splitext(filename)
+    if ext:
+        return ext
+    mapping = {
+        "image/png": ".png",
+        "image/jpeg": ".jpg",
+        "image/webp": ".webp",
+        "application/pdf": ".pdf",
+        "text/plain": ".txt",
+    }
+    return mapping.get(content_type, ".bin")
+
+def create_file_record(filename: str, content_type: str, purpose: str, file_bytes: bytes) -> Dict[str, Any]:
+    safe_name = sanitize_filename(filename)
+    file_id = f"file-{uuid.uuid4().hex}"
+    ext = get_file_extension(safe_name, content_type)
+    stored_name = f"{file_id}{ext}"
+    stored_path = os.path.join(UPLOADS_DIR, stored_name)
+
+    with open(stored_path, "wb") as f:
+        f.write(file_bytes)
+
+    record = {
+        "id": file_id,
+        "object": "file",
+        "bytes": len(file_bytes),
+        "created_at": int(time.time()),
+        "filename": safe_name,
+        "purpose": purpose or "assistants",
+        "content_type": content_type or "application/octet-stream",
+        "path": stored_path,
+        "content_b64": "",
+    }
+
+    if (IS_VERCEL or redis_storage_enabled() or upstash_enabled()) and len(file_bytes) <= INLINE_FILE_MAX_BYTES:
+        record["content_b64"] = base64.b64encode(file_bytes).decode("ascii")
+
+    with data_lock:
+        data = load_data()
+        data.setdefault("files", {})
+        data["files"][file_id] = record
+        save_data(data)
+
+    return record
+
+def get_file_record(file_id: str) -> Optional[Dict[str, Any]]:
+    files = get_files()
+    record = files.get(file_id)
+    if not record:
+        return None
+    normalize_file_record(file_id, record)
+    path = record.get("path", "")
+    if (not path or not os.path.exists(path)) and record.get("content_b64"):
+        ext = get_file_extension(record.get("filename", ""), record.get("content_type", ""))
+        restored_path = os.path.join(UPLOADS_DIR, f"{file_id}{ext}")
+        with open(restored_path, "wb") as f:
+            f.write(base64.b64decode(record["content_b64"]))
+        record["path"] = restored_path
+    return record
+
+def serialize_file_record(record: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "id": record.get("id", ""),
+        "object": "file",
+        "bytes": record.get("bytes", 0),
+        "created_at": record.get("created_at", 0),
+        "filename": record.get("filename", ""),
+        "purpose": record.get("purpose", "assistants"),
+    }
+
+def delete_file_record(file_id: str) -> bool:
+    with data_lock:
+        data = load_data()
+        record = data.get("files", {}).get(file_id)
+        if not record:
+            return False
+        path = record.get("path", "")
+        if path and os.path.exists(path):
+            try:
+                os.remove(path)
+            except Exception:
+                pass
+        del data["files"][file_id]
+        save_data(data)
+        return True
 
 def get_active_cookie() -> Optional[Dict]:
     """Get a random active cookie for API requests"""
@@ -911,6 +1035,36 @@ class ChatCompletionResponse(BaseModel):
     choices: List[ChatCompletionResponseChoice]
     usage: Dict[str, int]
 
+@app.post("/v1/files", dependencies=[Depends(verify_api_key)])
+async def create_file(
+    file: UploadFile = File(...),
+    purpose: str = Form("assistants")
+):
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Empty file")
+
+    record = create_file_record(
+        filename=file.filename or "upload.bin",
+        content_type=file.content_type or "application/octet-stream",
+        purpose=purpose,
+        file_bytes=content
+    )
+    return serialize_file_record(record)
+
+@app.get("/v1/files/{file_id}", dependencies=[Depends(verify_api_key)])
+def retrieve_file(file_id: str):
+    record = get_file_record(file_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="File not found")
+    return serialize_file_record(record)
+
+@app.delete("/v1/files/{file_id}", dependencies=[Depends(verify_api_key)])
+def delete_file(file_id: str):
+    if not delete_file_record(file_id):
+        raise HTTPException(status_code=404, detail="File not found")
+    return {"id": file_id, "object": "file.deleted", "deleted": True}
+
 def save_image_locally(url: str, cookies: Dict[str, str]) -> Optional[str]:
     """Downloads image and returns local filename"""
     try:
@@ -932,15 +1086,13 @@ def image_to_base64(path: str) -> str:
     with open(path, "rb") as f:
         return base64.b64encode(f.read()).decode('utf-8')
 
-def extract_content_and_images(content: Union[str, List[Dict[str, Any]]]) -> tuple:
-    """Extract text and image files from OpenAI-style multimodal content.
-    Returns (text_prompt, list_of_temp_image_paths)
-    """
+def extract_content_and_files(content: Union[str, List[Dict[str, Any]]]) -> tuple:
+    """Extract text and local file paths from OpenAI-style content."""
     if isinstance(content, str):
         return content, []
     
     text_parts = []
-    image_paths = []
+    file_paths = []
     
     for part in content:
         if part.get("type") == "text":
@@ -967,7 +1119,7 @@ def extract_content_and_images(content: Union[str, List[Dict[str, Any]]]) -> tup
                     temp_path = os.path.join(IMAGE_CACHE_DIR, f"upload_{uuid.uuid4().hex}.{ext}")
                     with open(temp_path, "wb") as f:
                         f.write(img_data)
-                    image_paths.append(temp_path)
+                    file_paths.append(temp_path)
                 except Exception as e:
                     print(f"Failed to decode base64 image: {e}")
             elif url.startswith("http"):
@@ -981,11 +1133,24 @@ def extract_content_and_images(content: Union[str, List[Dict[str, Any]]]) -> tup
                         temp_path = os.path.join(IMAGE_CACHE_DIR, f"upload_{uuid.uuid4().hex}.{ext}")
                         with open(temp_path, "wb") as f:
                             f.write(resp.content)
-                        image_paths.append(temp_path)
+                        file_paths.append(temp_path)
                 except Exception as e:
                     print(f"Failed to download image from URL: {e}")
+        elif part.get("type") == "input_file":
+            file_id = part.get("file_id") or part.get("input_file", {}).get("file_id")
+            if not file_id:
+                continue
+            record = get_file_record(file_id)
+            if not record:
+                raise HTTPException(status_code=404, detail=f"File not found: {file_id}")
+            file_path = record.get("path", "")
+            if not file_path or not os.path.exists(file_path):
+                raise HTTPException(status_code=404, detail=f"Uploaded file content unavailable: {file_id}")
+            file_paths.append(file_path)
+            if record.get("filename"):
+                text_parts.append(f"[Attached file: {record['filename']}]")
     
-    return " ".join(text_parts), image_paths
+    return " ".join(text_parts).strip(), file_paths
 
 @app.post("/v1/chat/completions", dependencies=[Depends(verify_api_key)])
 async def chat_completions(req: ChatCompletionRequest, request: Request):
@@ -995,8 +1160,8 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
     last_msg = req.messages[-1]
     
     # Extract text and images from multimodal content
-    prompt, image_files = extract_content_and_images(last_msg.content)
-    temp_files = image_files  # Track for cleanup
+    prompt, input_files = extract_content_and_files(last_msg.content)
+    temp_files = [p for p in input_files if os.path.dirname(p) == IMAGE_CACHE_DIR]
     
     # Get settings for proxy
     settings = get_settings()
@@ -1041,8 +1206,8 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
                 )
                 client.init(timeout=min(timeout, 30))
 
-                if image_files:
-                    output = client.generate_content(prompt, image_files, req.model, None, None)
+                if input_files:
+                    output = client.generate_content(prompt, input_files, req.model, None, None)
                 else:
                     chat = client.start_chat(model=req.model)
                     output = chat.send_message(prompt)
