@@ -74,7 +74,7 @@ python main.py
 
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/luoluoluo22/geminiweb2api)
 
-仓库已包含 `app.py`、`vercel.json` 和 `.vercelignore`，推送到 GitHub 后可直接导入到 Vercel。
+仓库已包含 `api/index.py`、`vercel.json` 和 `.vercelignore`，推送到 GitHub 后可直接导入到 Vercel。
 
 首次部署建议在 Vercel Project Settings -> Environment Variables 中至少配置：
 
