@@ -32,3 +32,5 @@ data/
 cookies.json
 api_logs.json
 geminiweb2api/static/images/
+server_stdout.log
+server_stderr.log

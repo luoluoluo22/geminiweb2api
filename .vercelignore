@@ -1,0 +1,9 @@
+.git
+.github
+venv
+__pycache__
+*.pyc
+cookies.json
+data
+server_stdout.log
+server_stderr.log

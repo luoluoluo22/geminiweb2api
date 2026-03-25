@@ -12,7 +12,15 @@ from .auth import get_access_token, rotate_1psidts, AuthError
 from .conversation import ChatSession
 
 class GeminiClient:
-    def __init__(self, secure_1psid: str, secure_1psidts: Optional[str] = None, proxy: Optional[str] = None, on_cookies_updated: Optional[Callable[[Dict[str, str]], None]] = None, full_cookies: Optional[Dict[str, str]] = None):
+    def __init__(
+        self,
+        secure_1psid: str,
+        secure_1psidts: Optional[str] = None,
+        proxy: Optional[str] = None,
+        on_cookies_updated: Optional[Callable[[Dict[str, str]], None]] = None,
+        full_cookies: Optional[Dict[str, str]] = None,
+        timeout: int = 120
+    ):
         # If full_cookies provided, use it as base (for image operations that need more cookies)
         if full_cookies:
             self.cookies = full_cookies.copy()
@@ -31,6 +39,7 @@ class GeminiClient:
         self.access_token = None
         self.running = False
         self.on_cookies_updated = on_cookies_updated
+        self.timeout = timeout
         
         if proxy:
             self.session.proxies.update({"http": proxy, "https": proxy})
@@ -42,7 +51,7 @@ class GeminiClient:
         """
         try:
             print("Refreshing cookies...")
-            new_ts = rotate_1psidts(self.cookies, self.proxy)
+            new_ts = rotate_1psidts(self.cookies, self.proxy, timeout=min(self.timeout, 15))
             if new_ts:
                 print(f"Cookie rotation successful. New 1PSIDTS found.")
                 # Update local state
@@ -60,13 +69,19 @@ class GeminiClient:
             print(f"Cookie refresh failed: {e}")
             return False
 
-    def init(self, timeout: int = 30):
+    def init(self, timeout: Optional[int] = None):
         try:
-            token, valid_cookies = get_access_token(self.cookies, self.proxy)
+            token, valid_cookies = get_access_token(
+                self.cookies,
+                self.proxy,
+                timeout=timeout or min(self.timeout, 30)
+            )
             self.access_token = token
             self.cookies = valid_cookies
             self.session.cookies.update(valid_cookies)
             self.running = True
+            if self.on_cookies_updated:
+                self.on_cookies_updated(valid_cookies)
         except AuthError as e:
             raise e 
         except Exception as e:
@@ -98,7 +113,7 @@ class GeminiClient:
                     Endpoints.Upload,
                     files=files,
                     headers=headers,
-                    timeout=300,
+                    timeout=max(self.timeout, 120),
                     proxies=proxies
                 )
                 if resp.status_code != 200:
@@ -155,13 +170,19 @@ class GeminiClient:
                 Endpoints.Generate, 
                 data=params, 
                 headers=headers, 
-                timeout=120
+                timeout=self.timeout
             )
             resp.raise_for_status()
         except requests.HTTPError as e:
             if e.response.status_code == 429:
                 raise Exception("Too many requests (429)")
             raise e
+        finally:
+            current_cookies = self.session.cookies.get_dict()
+            if current_cookies:
+                self.cookies.update(current_cookies)
+                if self.on_cookies_updated:
+                    self.on_cookies_updated(self.cookies.copy())
 
         return self._parse_response(resp.text)
 

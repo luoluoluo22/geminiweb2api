@@ -1,14 +1,16 @@
 import requests
 import re
-import json
-from urllib.parse import urlparse
 from typing import Dict, Tuple, Optional
 from .constants import Endpoints, Headers
 
 class AuthError(Exception):
     pass
 
-def get_access_token(cookies: Dict[str, str], proxy: Optional[str] = None) -> Tuple[str, Dict[str, str]]:
+def get_access_token(
+    cookies: Dict[str, str],
+    proxy: Optional[str] = None,
+    timeout: int = 20
+) -> Tuple[str, Dict[str, str]]:
     """
     Retrieves the SNlM0e nonce (access token) and verifies cookies.
     Returns (token, valid_cookies).
@@ -24,9 +26,10 @@ def get_access_token(cookies: Dict[str, str], proxy: Optional[str] = None) -> Tu
     # 2. Try with provided cookies
     required = ["__Secure-1PSID", "__Secure-1PSIDTS"]
     if not all(k in cookies for k in required):
-         # If TS missing, maybe we can fetch it via Rotate? 
-         # For now, just warn or proceed if user only gave PSID (might fail)
-         pass
+        refreshed_ts = rotate_1psidts(cookies, proxy, timeout=min(timeout, 15))
+        if refreshed_ts:
+            cookies = cookies.copy()
+            cookies["__Secure-1PSIDTS"] = refreshed_ts
 
     # 3. Send Init Request to get SNlM0e
     session = requests.Session()
@@ -38,7 +41,7 @@ def get_access_token(cookies: Dict[str, str], proxy: Optional[str] = None) -> Tu
         session.cookies.set(k, v)
 
     try:
-        resp = session.get(Endpoints.Init, timeout=20)
+        resp = session.get(Endpoints.Init, timeout=timeout)
         resp.raise_for_status()
     except Exception as e:
         raise AuthError(f"Init request failed: {e}")
@@ -56,7 +59,11 @@ def get_access_token(cookies: Dict[str, str], proxy: Optional[str] = None) -> Tu
     
     return token, valid_cookies
 
-def rotate_1psidts(cookies: Dict[str, str], proxy: Optional[str] = None) -> Optional[str]:
+def rotate_1psidts(
+    cookies: Dict[str, str],
+    proxy: Optional[str] = None,
+    timeout: int = 10
+) -> Optional[str]:
     """
     Rotates the __Secure-1PSIDTS cookie.
     Uses the same format as CLIProxyAPI.
@@ -77,7 +84,7 @@ def rotate_1psidts(cookies: Dict[str, str], proxy: Optional[str] = None) -> Opti
             headers=Headers.RotateCookies,
             cookies=cookies,
             proxies=proxies,
-            timeout=10
+            timeout=timeout
         )
         resp.raise_for_status()
     except Exception as e:

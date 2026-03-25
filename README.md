@@ -70,6 +70,59 @@ pip install -r requirements.txt
 python main.py
 ```
 
+### 方式三：Vercel 一键部署
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/luoluoluo22/geminiweb2api)
+
+仓库已包含 `app.py`、`vercel.json` 和 `.vercelignore`，推送到 GitHub 后可直接导入到 Vercel。
+
+首次部署建议在 Vercel Project Settings -> Environment Variables 中至少配置：
+
+- `UPSTASH_REDIS_URL`: 推荐直接填写 `redis://default:password@host:6379` 这种连接串，最直观
+- `UPSTASH_REDIS_REST_URL`: 推荐填写带 Token 的完整 Upstash REST URL，例如 `https://xxx-xxxxx.upstash.io?_token=xxxxx`
+- `BOOTSTRAP_COOKIE_STRING`: 完整 Gemini Cookie 字符串，至少要包含 `__Secure-1PSID`，最好同时包含 `__Secure-1PSIDTS`
+- `BOOTSTRAP_API_KEY`: 对外提供给 OpenAI SDK 的 API Key
+- `BOOTSTRAP_ADMIN_USERNAME`: 后台用户名
+- `BOOTSTRAP_ADMIN_PASSWORD`: 后台密码
+
+可选环境变量：
+
+- `UPSTASH_REDIS_KEY`: Redis 中使用的键名，默认 `geminiweb2api:data`
+- `BOOTSTRAP_IMAGE_MODE`: `url` 或 `base64`，Vercel 上如果设置为 `url` 会自动降级为 `base64`
+- `BOOTSTRAP_PROXY_URL`: 代理地址
+- `BOOTSTRAP_TIMEOUT`: 请求超时秒数
+
+推荐部署方式：
+
+1.  在 Upstash 创建 Redis 数据库。
+2.  直接复制 `redis://default:password@host:6379` 连接串。
+3.  在 Vercel 只创建一个环境变量 `UPSTASH_REDIS_URL`，值就是上面的完整连接串。
+4.  再填写 `BOOTSTRAP_COOKIE_STRING`、`BOOTSTRAP_API_KEY` 等初始化变量后部署。
+
+如果你更习惯 REST 方式，也可以继续使用 `UPSTASH_REDIS_REST_URL`。
+
+Upstash 创建步骤：
+
+1.  登录 Upstash 控制台并新建一个 Redis Database。
+2.  在数据库详情页找到 `Details` 或连接信息区域。
+3.  复制 `redis://default:password@host:6379` 连接串。
+4.  把这整串填到 Vercel 的 `UPSTASH_REDIS_URL` 环境变量。
+5.  如果你不用 `redis://`，也可以到 `REST API` 区域复制 `Endpoint` 和 `Token`，拼成 `UPSTASH_REDIS_REST_URL`。
+
+说明：
+
+- 项目现在会优先使用 Upstash Redis 持久化 `cookies.json` 中的全部内容，包括 Cookie 池、管理员配置、API Key、插件 Token 和保活状态。
+- 如果同时配置了 `UPSTASH_REDIS_URL` 和 `UPSTASH_REDIS_REST_URL`，会优先使用 `UPSTASH_REDIS_URL`。
+- 如果配置了 `UPSTASH_REDIS_REST_URL`，即使 Vercel 实例重启，数据也不会随着 `/tmp` 一起丢失。
+- 如果 `UPSTASH_REDIS_REST_URL` 本身已经带 `_token=...`，就不需要额外再配置 `UPSTASH_REDIS_REST_TOKEN`。
+
+注意事项：
+
+- Vercel 是 Serverless 环境，没有稳定的本地持久化磁盘，也不适合长期后台循环。
+- 当前实现会在 Vercel 上自动关闭后台保活循环，改为“每次请求前按需保活”。
+- 如果没有接入 Upstash，`cookies.json` 和图片缓存会落在 `/tmp`，实例回收后可能丢失。
+- 图片缓存本身仍然是临时文件，不建议把 Vercel 当成长期图片托管。
+
 ---
 
 ## ⚙️ 配置指南
