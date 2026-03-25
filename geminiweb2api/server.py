@@ -954,184 +954,177 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
     proxy = settings.get("proxy_url", "") or None
     image_mode = get_effective_image_mode(settings)
     timeout = get_request_timeout()
-    
-    # Retry logic: try up to 3 times with different cookies
-    max_retries = 3
-    last_error = None
-    tried_cookie_ids = set()
-    
-    for attempt in range(max_retries):
-        candidates = get_candidate_cookies(tried_cookie_ids)
-        if not candidates:
-            # No more cookies to try
-            break
 
-        cookie_id, cookie_data = candidates[0]
-        tried_cookie_ids.add(cookie_id)
-        
-        try:
-            refresh_ok, refresh_reason = refresh_cookie_state(
-                cookie_id,
-                cookie_data,
-                proxy=proxy,
-                timeout=timeout
-            )
-            if not refresh_ok:
-                raise Exception(f"Cookie keepalive failed: {refresh_reason}")
+    def run_completion() -> str:
+        max_retries = 3
+        last_error = None
+        tried_cookie_ids = set()
 
-            fresh_cookie_data = get_cookies().get(cookie_id, cookie_data)
-            full_cookies = build_full_cookie_dict(fresh_cookie_data)
-            
-            # Create client with full cookie set for image operations
-            client = GeminiClient(
-                fresh_cookie_data["psid"],
-                fresh_cookie_data.get("psidts", ""),
-                proxy=proxy,
-                full_cookies=full_cookies,
-                timeout=timeout,
-                on_cookies_updated=lambda updated, cid=cookie_id: persist_cookie_state(cid, updated)
-            )
-            client.init(timeout=min(timeout, 30))
-            
-            # Use generate_content for multimodal, otherwise simple chat
-            if image_files:
-                output = client.generate_content(prompt, image_files, req.model, None, None)
-            else:
-                chat = client.start_chat(model=req.model)
-                output = chat.send_message(prompt)
-            
-            # Increment usage on success
-            persist_cookie_state(cookie_id, client.cookies)
-            increment_cookie_usage(cookie_id)
-            mark_cookie_recovered(cookie_id)
-            
-            content = output.text
-            
-            if output.candidates:
-                candidate = output.candidates[output.chosen]
-                for img in candidate.generated_images:
-                    local_name = save_image_locally(img.image.url, client.cookies)
-                    
-                    final_url = img.image.url
-                    
-                    if local_name:
-                        local_path = os.path.join(IMAGE_CACHE_DIR, local_name)
-                        
-                        if image_mode == "base64":
-                            try:
-                                b64_str = image_to_base64(local_path)
-                                final_url = f"data:image/png;base64,{b64_str}"
-                            except:
-                                pass
-                        else:
-                            final_url = f"{request.base_url}images/{local_name}"
-                    
-                    content += f"\n\n![Generated Image]({final_url})"
-            
-            # Handle Streaming Request
-            if req.stream:
-                from fastapi.responses import StreamingResponse
-                
-                async def generate_stream():
-                    chunk_id = f"chatcmpl-{uuid.uuid4()}"
-                    created = int(time.time())
-                    
-                    # Yield single chunk with full content (simulated stream)
-                    # Clients usually expect small chunks, but one big chunk is valid SSE
-                    chunk_data = {
-                        "id": chunk_id,
-                        "object": "chat.completion.chunk",
-                        "created": created,
-                        "model": req.model,
-                        "choices": [
-                            {
-                                "index": 0,
-                                "delta": {"role": "assistant", "content": content},
-                                "finish_reason": None
-                            }
-                        ]
-                    }
-                    yield f"data: {json.dumps(chunk_data)}\n\n"
-                    
-                    # Stop chunk
-                    stop_data = {
-                        "id": chunk_id,
-                        "object": "chat.completion.chunk",
-                        "created": created,
-                        "model": req.model,
-                        "choices": [
-                            {
-                                "index": 0,
-                                "delta": {},
-                                "finish_reason": "stop"
-                            }
-                        ]
-                    }
-                    yield f"data: {json.dumps(stop_data)}\n\n"
-                    yield "data: [DONE]\n\n"
-                    
-                return StreamingResponse(generate_stream(), media_type="text/event-stream")
+        for attempt in range(max_retries):
+            output = None
+            candidates = get_candidate_cookies(tried_cookie_ids)
+            if not candidates:
+                break
 
-            return ChatCompletionResponse(
-                id=f"chatcmpl-{uuid.uuid4()}",
-                created=int(time.time()),
-                model=req.model,
-                choices=[
-                    ChatCompletionResponseChoice(
-                        index=0,
-                        message={"role": "assistant", "content": content},
-                        finish_reason="stop"
-                    )
-                ],
-                usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-            )
-            
-        except Exception as e:
-            last_error = e
-            error_msg = str(e).lower()
-            
-            # Check if this is a retryable error (auth/cookie related)
-            is_retryable = any(keyword in error_msg for keyword in [
-                "503", "401", "unauthorized", "auth", "cookie", "token", "psid", "expired"
-            ])
-            
-            if is_retryable:
-                print(f"Attempt {attempt + 1}/{max_retries} failed with cookie {cookie_id[:8]}...: {e}")
-                recovered, recovered_reason = refresh_cookie_state(
+            cookie_id, cookie_data = candidates[0]
+            tried_cookie_ids.add(cookie_id)
+
+            try:
+                refresh_ok, refresh_reason = refresh_cookie_state(
                     cookie_id,
-                    get_cookies().get(cookie_id, cookie_data),
+                    cookie_data,
                     proxy=proxy,
-                    timeout=timeout,
-                    force=True
+                    timeout=timeout
                 )
-                if recovered:
-                    update_cookie_record(
-                        cookie_id,
-                        status="待恢复",
-                        failure_count=max(0, cookie_data.get("failure_count", 0)),
-                        cooldown_until=0,
-                        last_error=f"Recovered after: {str(e)[:200]}",
-                        last_check_time=int(time.time())
-                    )
+                if not refresh_ok:
+                    raise Exception(f"Cookie keepalive failed: {refresh_reason}")
+
+                fresh_cookie_data = get_cookies().get(cookie_id, cookie_data)
+                full_cookies = build_full_cookie_dict(fresh_cookie_data)
+
+                client = GeminiClient(
+                    fresh_cookie_data["psid"],
+                    fresh_cookie_data.get("psidts", ""),
+                    proxy=proxy,
+                    full_cookies=full_cookies,
+                    timeout=timeout,
+                    on_cookies_updated=lambda updated, cid=cookie_id: persist_cookie_state(cid, updated)
+                )
+                client.init(timeout=min(timeout, 30))
+
+                if image_files:
+                    output = client.generate_content(prompt, image_files, req.model, None, None)
                 else:
-                    mark_cookie_failed(cookie_id, f"{e} | refresh: {recovered_reason}")
-            else:
-                # Non-retryable error, mark cookie as failed and raise immediately
-                mark_cookie_failed(cookie_id, str(e))
-                raise HTTPException(status_code=500, detail=str(e))
-        
-        finally:
-            # Cleanup temp uploaded files only on last attempt or success
-            if attempt == max_retries - 1 or 'output' in locals():
-                for f in temp_files:
-                    try:
-                        if os.path.exists(f):
-                            os.remove(f)
-                    except:
-                        pass
-    
-    # All retries exhausted
-    raise HTTPException(status_code=503, detail=f"All cookies failed. Last error: {last_error}")
+                    chat = client.start_chat(model=req.model)
+                    output = chat.send_message(prompt)
+
+                persist_cookie_state(cookie_id, client.cookies)
+                increment_cookie_usage(cookie_id)
+                mark_cookie_recovered(cookie_id)
+
+                content = output.text
+
+                if output.candidates:
+                    candidate = output.candidates[output.chosen]
+                    for img in candidate.generated_images:
+                        local_name = save_image_locally(img.image.url, client.cookies)
+
+                        final_url = img.image.url
+                        if local_name:
+                            local_path = os.path.join(IMAGE_CACHE_DIR, local_name)
+                            if image_mode == "base64":
+                                try:
+                                    b64_str = image_to_base64(local_path)
+                                    final_url = f"data:image/png;base64,{b64_str}"
+                                except Exception:
+                                    pass
+                            else:
+                                final_url = f"{request.base_url}images/{local_name}"
+
+                        content += f"\n\n![Generated Image]({final_url})"
+
+                return content
+
+            except Exception as e:
+                last_error = e
+                error_msg = str(e).lower()
+                is_retryable = any(keyword in error_msg for keyword in [
+                    "503", "401", "unauthorized", "auth", "cookie", "token", "psid", "expired"
+                ])
+
+                if is_retryable:
+                    print(f"Attempt {attempt + 1}/{max_retries} failed with cookie {cookie_id[:8]}...: {e}")
+                    recovered, recovered_reason = refresh_cookie_state(
+                        cookie_id,
+                        get_cookies().get(cookie_id, cookie_data),
+                        proxy=proxy,
+                        timeout=timeout,
+                        force=True
+                    )
+                    if recovered:
+                        update_cookie_record(
+                            cookie_id,
+                            status="待恢复",
+                            failure_count=max(0, cookie_data.get("failure_count", 0)),
+                            cooldown_until=0,
+                            last_error=f"Recovered after: {str(e)[:200]}",
+                            last_check_time=int(time.time())
+                        )
+                    else:
+                        mark_cookie_failed(cookie_id, f"{e} | refresh: {recovered_reason}")
+                else:
+                    mark_cookie_failed(cookie_id, str(e))
+                    raise HTTPException(status_code=500, detail=str(e))
+
+            finally:
+                if attempt == max_retries - 1 or output is not None:
+                    for f in temp_files:
+                        try:
+                            if os.path.exists(f):
+                                os.remove(f)
+                        except Exception:
+                            pass
+
+        raise HTTPException(status_code=503, detail=f"All cookies failed. Last error: {last_error}")
+
+    if req.stream:
+        from fastapi.responses import StreamingResponse
+
+        async def generate_stream():
+            chunk_id = f"chatcmpl-{uuid.uuid4()}"
+            created = int(time.time())
+
+            # Send an early SSE event so browsers/clients don't time out during image generation.
+            yield ": keep-alive\n\n"
+
+            content = run_completion()
+            chunk_data = {
+                "id": chunk_id,
+                "object": "chat.completion.chunk",
+                "created": created,
+                "model": req.model,
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {"role": "assistant", "content": content},
+                        "finish_reason": None
+                    }
+                ]
+            }
+            yield f"data: {json.dumps(chunk_data)}\n\n"
+
+            stop_data = {
+                "id": chunk_id,
+                "object": "chat.completion.chunk",
+                "created": created,
+                "model": req.model,
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {},
+                        "finish_reason": "stop"
+                    }
+                ]
+            }
+            yield f"data: {json.dumps(stop_data)}\n\n"
+            yield "data: [DONE]\n\n"
+
+        return StreamingResponse(generate_stream(), media_type="text/event-stream")
+
+    content = run_completion()
+    return ChatCompletionResponse(
+        id=f"chatcmpl-{uuid.uuid4()}",
+        created=int(time.time()),
+        model=req.model,
+        choices=[
+            ChatCompletionResponseChoice(
+                index=0,
+                message={"role": "assistant", "content": content},
+                finish_reason="stop"
+            )
+        ],
+        usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+    )
 
 @app.get("/v1/models")
 def list_models():
