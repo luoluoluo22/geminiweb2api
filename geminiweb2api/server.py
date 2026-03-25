@@ -1,6 +1,6 @@
 from typing import List, Optional, Union, Dict, Any
 from fastapi import FastAPI, HTTPException, Depends, Header, Request, status, UploadFile, File, Form
-from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, PlainTextResponse, Response
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -606,6 +606,15 @@ def serialize_file_record(record: Dict[str, Any]) -> Dict[str, Any]:
         "purpose": record.get("purpose", "assistants"),
     }
 
+def read_file_bytes(record: Dict[str, Any]) -> bytes:
+    path = record.get("path", "")
+    if path and os.path.exists(path):
+        with open(path, "rb") as f:
+            return f.read()
+    if record.get("content_b64"):
+        return base64.b64decode(record["content_b64"])
+    raise FileNotFoundError(record.get("id", "unknown"))
+
 def delete_file_record(file_id: str) -> bool:
     with data_lock:
         data = load_data()
@@ -1035,6 +1044,124 @@ class ChatCompletionResponse(BaseModel):
     choices: List[ChatCompletionResponseChoice]
     usage: Dict[str, int]
 
+class ImageGenerationRequest(BaseModel):
+    model: str = "gemini-3.0-flash"
+    prompt: str
+    n: int = 1
+    response_format: str = "url"
+    size: Optional[str] = None
+
+def run_gemini_request(
+    model: str,
+    prompt: str,
+    input_files: List[str],
+    request: Request,
+    image_mode: str,
+    proxy: Optional[str],
+    timeout: int
+) -> tuple[str, List[str]]:
+    max_retries = 3
+    last_error = None
+    tried_cookie_ids = set()
+
+    for attempt in range(max_retries):
+        output = None
+        candidates = get_candidate_cookies(tried_cookie_ids)
+        if not candidates:
+            break
+
+        cookie_id, cookie_data = candidates[0]
+        tried_cookie_ids.add(cookie_id)
+
+        try:
+            refresh_ok, refresh_reason = refresh_cookie_state(
+                cookie_id,
+                cookie_data,
+                proxy=proxy,
+                timeout=timeout
+            )
+            if not refresh_ok:
+                raise Exception(f"Cookie keepalive failed: {refresh_reason}")
+
+            fresh_cookie_data = get_cookies().get(cookie_id, cookie_data)
+            full_cookies = build_full_cookie_dict(fresh_cookie_data)
+
+            client = GeminiClient(
+                fresh_cookie_data["psid"],
+                fresh_cookie_data.get("psidts", ""),
+                proxy=proxy,
+                full_cookies=full_cookies,
+                timeout=timeout,
+                on_cookies_updated=lambda updated, cid=cookie_id: persist_cookie_state(cid, updated)
+            )
+            client.init(timeout=min(timeout, 30))
+
+            if input_files:
+                output = client.generate_content(prompt, input_files, model, None, None)
+            else:
+                chat = client.start_chat(model=model)
+                output = chat.send_message(prompt)
+
+            update_cookie_after_success(cookie_id, client.cookies)
+
+            content = output.text
+            image_urls: List[str] = []
+
+            if output.candidates:
+                candidate = output.candidates[output.chosen]
+                for img in candidate.generated_images:
+                    local_name = save_image_locally(img.image.url, client.cookies)
+
+                    final_url = img.image.url
+                    if local_name:
+                        local_path = os.path.join(IMAGE_CACHE_DIR, local_name)
+                        if image_mode == "base64":
+                            try:
+                                b64_str = image_to_base64(local_path)
+                                final_url = f"data:image/png;base64,{b64_str}"
+                            except Exception:
+                                pass
+                        else:
+                            final_url = f"{request.base_url}images/{local_name}"
+
+                    image_urls.append(final_url)
+                    content += f"\n\n![Generated Image]({final_url})"
+
+            return content, image_urls
+
+        except Exception as e:
+            last_error = e
+            error_msg = str(e).lower()
+            is_retryable = any(keyword in error_msg for keyword in [
+                "503", "401", "unauthorized", "auth", "cookie", "token", "psid", "expired"
+            ])
+
+            if is_retryable:
+                print(f"Attempt {attempt + 1}/{max_retries} failed with cookie {cookie_id[:8]}...: {e}")
+                recovered, recovered_reason = refresh_cookie_state(
+                    cookie_id,
+                    get_cookies().get(cookie_id, cookie_data),
+                    proxy=proxy,
+                    timeout=timeout,
+                    force=True
+                )
+                if recovered:
+                    update_cookie_record(
+                        cookie_id,
+                        status="待恢复",
+                        failure_count=max(0, cookie_data.get("failure_count", 0)),
+                        cooldown_until=0,
+                        last_error=f"Recovered after: {str(e)[:200]}",
+                        last_check_time=int(time.time())
+                    )
+                else:
+                    mark_cookie_failed(cookie_id, f"{e} | refresh: {recovered_reason}")
+            else:
+                mark_cookie_failed(cookie_id, str(e))
+                raise HTTPException(status_code=500, detail=str(e))
+
+    raise HTTPException(status_code=503, detail=f"All cookies failed. Last error: {last_error}")
+
 @app.post("/v1/files", dependencies=[Depends(verify_api_key)])
 async def create_file(
     file: UploadFile = File(...),
@@ -1059,11 +1186,71 @@ def retrieve_file(file_id: str):
         raise HTTPException(status_code=404, detail="File not found")
     return serialize_file_record(record)
 
+@app.get("/v1/files", dependencies=[Depends(verify_api_key)])
+def list_files():
+    files = [
+        serialize_file_record(record)
+        for _, record in sorted(get_files().items(), key=lambda item: item[1].get("created_at", 0), reverse=True)
+    ]
+    return {"object": "list", "data": files}
+
+@app.get("/v1/files/{file_id}/content", dependencies=[Depends(verify_api_key)])
+def retrieve_file_content(file_id: str):
+    record = get_file_record(file_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="File not found")
+    try:
+        content = read_file_bytes(record)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="File content not found")
+    media_type = record.get("content_type", "application/octet-stream")
+    headers = {
+        "Content-Disposition": f"attachment; filename=\"{sanitize_filename(record.get('filename', file_id))}\""
+    }
+    return Response(content=content, media_type=media_type, headers=headers)
+
 @app.delete("/v1/files/{file_id}", dependencies=[Depends(verify_api_key)])
 def delete_file(file_id: str):
     if not delete_file_record(file_id):
         raise HTTPException(status_code=404, detail="File not found")
     return {"id": file_id, "object": "file.deleted", "deleted": True}
+
+@app.post("/v1/images/generations", dependencies=[Depends(verify_api_key)])
+async def image_generations(req: ImageGenerationRequest, request: Request):
+    if req.n != 1:
+        raise HTTPException(status_code=400, detail="Only n=1 is currently supported")
+    if req.response_format not in {"url", "b64_json"}:
+        raise HTTPException(status_code=400, detail="response_format must be 'url' or 'b64_json'")
+
+    settings = get_settings()
+    proxy = settings.get("proxy_url", "") or None
+    image_mode = "base64" if req.response_format == "b64_json" else get_effective_image_mode(settings)
+    timeout = get_request_timeout()
+
+    _, image_urls = run_gemini_request(
+        model=req.model,
+        prompt=req.prompt,
+        input_files=[],
+        request=request,
+        image_mode=image_mode,
+        proxy=proxy,
+        timeout=timeout
+    )
+
+    if not image_urls:
+        raise HTTPException(status_code=500, detail="Image generation returned no images")
+
+    data = []
+    for image_url in image_urls:
+        if image_url.startswith("data:image/"):
+            _, b64 = image_url.split(",", 1)
+            data.append({"b64_json": b64})
+        elif req.response_format == "b64_json":
+            raise HTTPException(status_code=500, detail="Image could not be converted to base64")
+        else:
+            data.append({"url": image_url})
+
+    return {"created": int(time.time()), "data": data}
 
 def save_image_locally(url: str, cookies: Dict[str, str]) -> Optional[str]:
     """Downloads image and returns local filename"""
@@ -1169,116 +1356,6 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
     image_mode = get_effective_image_mode(settings)
     timeout = get_request_timeout()
 
-    def run_completion() -> str:
-        max_retries = 3
-        last_error = None
-        tried_cookie_ids = set()
-
-        for attempt in range(max_retries):
-            output = None
-            candidates = get_candidate_cookies(tried_cookie_ids)
-            if not candidates:
-                break
-
-            cookie_id, cookie_data = candidates[0]
-            tried_cookie_ids.add(cookie_id)
-
-            try:
-                refresh_ok, refresh_reason = refresh_cookie_state(
-                    cookie_id,
-                    cookie_data,
-                    proxy=proxy,
-                    timeout=timeout
-                )
-                if not refresh_ok:
-                    raise Exception(f"Cookie keepalive failed: {refresh_reason}")
-
-                fresh_cookie_data = get_cookies().get(cookie_id, cookie_data)
-                full_cookies = build_full_cookie_dict(fresh_cookie_data)
-
-                client = GeminiClient(
-                    fresh_cookie_data["psid"],
-                    fresh_cookie_data.get("psidts", ""),
-                    proxy=proxy,
-                    full_cookies=full_cookies,
-                    timeout=timeout,
-                    on_cookies_updated=lambda updated, cid=cookie_id: persist_cookie_state(cid, updated)
-                )
-                client.init(timeout=min(timeout, 30))
-
-                if input_files:
-                    output = client.generate_content(prompt, input_files, req.model, None, None)
-                else:
-                    chat = client.start_chat(model=req.model)
-                    output = chat.send_message(prompt)
-
-                update_cookie_after_success(cookie_id, client.cookies)
-
-                content = output.text
-
-                if output.candidates:
-                    candidate = output.candidates[output.chosen]
-                    for img in candidate.generated_images:
-                        local_name = save_image_locally(img.image.url, client.cookies)
-
-                        final_url = img.image.url
-                        if local_name:
-                            local_path = os.path.join(IMAGE_CACHE_DIR, local_name)
-                            if image_mode == "base64":
-                                try:
-                                    b64_str = image_to_base64(local_path)
-                                    final_url = f"data:image/png;base64,{b64_str}"
-                                except Exception:
-                                    pass
-                            else:
-                                final_url = f"{request.base_url}images/{local_name}"
-
-                        content += f"\n\n![Generated Image]({final_url})"
-
-                return content
-
-            except Exception as e:
-                last_error = e
-                error_msg = str(e).lower()
-                is_retryable = any(keyword in error_msg for keyword in [
-                    "503", "401", "unauthorized", "auth", "cookie", "token", "psid", "expired"
-                ])
-
-                if is_retryable:
-                    print(f"Attempt {attempt + 1}/{max_retries} failed with cookie {cookie_id[:8]}...: {e}")
-                    recovered, recovered_reason = refresh_cookie_state(
-                        cookie_id,
-                        get_cookies().get(cookie_id, cookie_data),
-                        proxy=proxy,
-                        timeout=timeout,
-                        force=True
-                    )
-                    if recovered:
-                        update_cookie_record(
-                            cookie_id,
-                            status="待恢复",
-                            failure_count=max(0, cookie_data.get("failure_count", 0)),
-                            cooldown_until=0,
-                            last_error=f"Recovered after: {str(e)[:200]}",
-                            last_check_time=int(time.time())
-                        )
-                    else:
-                        mark_cookie_failed(cookie_id, f"{e} | refresh: {recovered_reason}")
-                else:
-                    mark_cookie_failed(cookie_id, str(e))
-                    raise HTTPException(status_code=500, detail=str(e))
-
-            finally:
-                if attempt == max_retries - 1 or output is not None:
-                    for f in temp_files:
-                        try:
-                            if os.path.exists(f):
-                                os.remove(f)
-                        except Exception:
-                            pass
-
-        raise HTTPException(status_code=503, detail=f"All cookies failed. Last error: {last_error}")
-
     if req.stream:
         from fastapi.responses import StreamingResponse
 
@@ -1289,7 +1366,15 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
             # Send an early SSE event so browsers/clients don't time out during image generation.
             yield ": keep-alive\n\n"
 
-            content = run_completion()
+            try:
+                content, _ = run_gemini_request(req.model, prompt, input_files, request, image_mode, proxy, timeout)
+            finally:
+                for f in temp_files:
+                    try:
+                        if os.path.exists(f):
+                            os.remove(f)
+                    except Exception:
+                        pass
             chunk_data = {
                 "id": chunk_id,
                 "object": "chat.completion.chunk",
@@ -1323,20 +1408,28 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
 
         return StreamingResponse(generate_stream(), media_type="text/event-stream")
 
-    content = run_completion()
-    return ChatCompletionResponse(
-        id=f"chatcmpl-{uuid.uuid4()}",
-        created=int(time.time()),
-        model=req.model,
-        choices=[
-            ChatCompletionResponseChoice(
-                index=0,
-                message={"role": "assistant", "content": content},
-                finish_reason="stop"
-            )
-        ],
-        usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-    )
+    try:
+        content, _ = run_gemini_request(req.model, prompt, input_files, request, image_mode, proxy, timeout)
+        return ChatCompletionResponse(
+            id=f"chatcmpl-{uuid.uuid4()}",
+            created=int(time.time()),
+            model=req.model,
+            choices=[
+                ChatCompletionResponseChoice(
+                    index=0,
+                    message={"role": "assistant", "content": content},
+                    finish_reason="stop"
+                )
+            ],
+            usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        )
+    finally:
+        for f in temp_files:
+            try:
+                if os.path.exists(f):
+                    os.remove(f)
+            except Exception:
+                pass
 
 @app.get("/v1/models")
 def list_models():
