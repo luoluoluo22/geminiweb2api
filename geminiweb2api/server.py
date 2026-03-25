@@ -65,7 +65,9 @@ DATA_FILE = os.path.join(DATA_DIR, "cookies.json")
 COOKIE_REFRESH_INTERVAL = 900  # 15 minutes
 COOKIE_HEALTHCHECK_INTERVAL = 21600  # 6 hours
 COOKIE_COOLDOWN_SECONDS = 300
+DATA_CACHE_TTL_SECONDS = 5
 data_lock = threading.Lock()
+data_cache: Dict[str, Any] = {"value": None, "expires_at": 0.0}
 
 # =============================================================================
 # Data Models
@@ -93,9 +95,20 @@ class SettingsUpdate(BaseModel):
 # Data Storage
 # =============================================================================
 
-def load_data() -> Dict:
+def clone_data(data: Dict[str, Any]) -> Dict[str, Any]:
+    return json.loads(json.dumps(data, ensure_ascii=False))
+
+def invalidate_data_cache():
+    data_cache["value"] = None
+    data_cache["expires_at"] = 0.0
+
+def load_data(force_refresh: bool = False) -> Dict:
     """Load data from JSON file, migrating old format if needed"""
     default = {"cookies": {}, "settings": {"admin_username": "admin", "admin_password": "admin", "api_key": "sk-123456", "image_mode": "url", "base_url": "", "plugin_token": ""}}
+    now = time.time()
+
+    if not force_refresh and data_cache["value"] is not None and data_cache["expires_at"] > now:
+        return clone_data(data_cache["value"])
 
     if redis_storage_enabled():
         try:
@@ -104,7 +117,10 @@ def load_data() -> Dict:
                 data = raw_data
             else:
                 data = apply_env_bootstrap(default)
-            return finalize_loaded_data(data, default)
+            finalized = finalize_loaded_data(data, default)
+            data_cache["value"] = clone_data(finalized)
+            data_cache["expires_at"] = time.time() + DATA_CACHE_TTL_SECONDS
+            return clone_data(finalized)
         except Exception as e:
             print(f"Error loading data from Redis URL: {e}")
 
@@ -115,7 +131,10 @@ def load_data() -> Dict:
                 data = raw_data
             else:
                 data = apply_env_bootstrap(default)
-            return finalize_loaded_data(data, default)
+            finalized = finalize_loaded_data(data, default)
+            data_cache["value"] = clone_data(finalized)
+            data_cache["expires_at"] = time.time() + DATA_CACHE_TTL_SECONDS
+            return clone_data(finalized)
         except Exception as e:
             print(f"Error loading data from Upstash: {e}")
 
@@ -123,24 +142,32 @@ def load_data() -> Dict:
         try:
             with open(DATA_FILE, 'r') as f:
                 data = json.load(f)
-            return finalize_loaded_data(data, default)
+            finalized = finalize_loaded_data(data, default)
+            data_cache["value"] = clone_data(finalized)
+            data_cache["expires_at"] = time.time() + DATA_CACHE_TTL_SECONDS
+            return clone_data(finalized)
         except Exception as e:
             print(f"Error loading data: {e}")
     
     # Generate token for new install
     default["settings"]["plugin_token"] = secrets.token_urlsafe(32)
-    return apply_env_bootstrap(default)
+    finalized = apply_env_bootstrap(default)
+    data_cache["value"] = clone_data(finalized)
+    data_cache["expires_at"] = time.time() + DATA_CACHE_TTL_SECONDS
+    return clone_data(finalized)
 
 def save_data(data: Dict):
     """Save data to JSON file"""
     if redis_storage_enabled():
         redis_set_json(data)
-        return
-    if upstash_enabled():
+    elif upstash_enabled():
         upstash_set_json(data)
-        return
-    with open(DATA_FILE, 'w') as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    else:
+        with open(DATA_FILE, 'w') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
+    data_cache["value"] = clone_data(data)
+    data_cache["expires_at"] = time.time() + DATA_CACHE_TTL_SECONDS
 
 def get_settings() -> Dict:
     return load_data().get("settings", {})
@@ -191,6 +218,28 @@ def update_cookie_record(cookie_id: str, **updates: Any) -> bool:
         data["cookies"][cookie_id].update(updates)
         save_data(data)
         return True
+
+def update_cookie_after_success(cookie_id: str, cookies: Dict[str, str], extra_updates: Optional[Dict[str, Any]] = None):
+    with data_lock:
+        data = load_data()
+        cookie_data = data["cookies"].get(cookie_id)
+        if not cookie_data:
+            return
+
+        normalize_cookie_record(cookie_id, cookie_data)
+        cookie_data["parsed"] = cookies.copy()
+        cookie_data["psid"] = cookies.get("__Secure-1PSID", cookie_data.get("psid", ""))
+        cookie_data["psidts"] = cookies.get("__Secure-1PSIDTS", cookie_data.get("psidts", ""))
+        cookie_data["status"] = "正常"
+        cookie_data["failure_count"] = 0
+        cookie_data["cooldown_until"] = 0
+        cookie_data["last_error"] = ""
+        cookie_data["last_check_time"] = int(time.time())
+        cookie_data["last_refresh_time"] = int(time.time())
+        cookie_data["use_count"] = cookie_data.get("use_count", 0) + 1
+        if extra_updates:
+            cookie_data.update(extra_updates)
+        save_data(data)
 
 def persist_cookie_state(cookie_id: str, cookies: Dict[str, str], status: str = "正常"):
     with data_lock:
@@ -998,9 +1047,7 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
                     chat = client.start_chat(model=req.model)
                     output = chat.send_message(prompt)
 
-                persist_cookie_state(cookie_id, client.cookies)
-                increment_cookie_usage(cookie_id)
-                mark_cookie_recovered(cookie_id)
+                update_cookie_after_success(cookie_id, client.cookies)
 
                 content = output.text
 
@@ -1172,10 +1219,9 @@ async def cookie_refresh_loop():
 
 @app.on_event("startup")
 async def startup():
-    # Ensure data file exists and all cookie records are normalized.
+    # Warm in-memory cache. Avoid unconditional writes on serverless cold starts.
     with data_lock:
-        data = load_data()
-        save_data(data)
+        load_data(force_refresh=True)
     
     print("GeminiWeb2API started. Visit /admin to configure.")
     if redis_storage_enabled():
