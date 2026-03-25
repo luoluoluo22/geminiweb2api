@@ -282,12 +282,12 @@ def parse_cookie_string(cookie_str: str) -> Dict[str, str]:
 def apply_env_bootstrap(data: Dict[str, Any]) -> Dict[str, Any]:
     """Initialize settings/cookies from environment variables for serverless deploys."""
     settings = data.setdefault("settings", {})
-    settings["admin_username"] = os.environ.get("BOOTSTRAP_ADMIN_USERNAME", settings.get("admin_username", "admin"))
-    settings["admin_password"] = os.environ.get("BOOTSTRAP_ADMIN_PASSWORD", settings.get("admin_password", "admin"))
-    settings["api_key"] = os.environ.get("BOOTSTRAP_API_KEY", settings.get("api_key", "sk-123456"))
-    settings["image_mode"] = os.environ.get("BOOTSTRAP_IMAGE_MODE", settings.get("image_mode", "url"))
-    settings["base_url"] = os.environ.get("BOOTSTRAP_BASE_URL", settings.get("base_url", ""))
-    settings["proxy_url"] = os.environ.get("BOOTSTRAP_PROXY_URL", settings.get("proxy_url", ""))
+    settings["admin_username"] = os.environ.get("BOOTSTRAP_ADMIN_USERNAME", settings.get("admin_username", "admin")).strip()
+    settings["admin_password"] = os.environ.get("BOOTSTRAP_ADMIN_PASSWORD", settings.get("admin_password", "admin")).strip()
+    settings["api_key"] = os.environ.get("BOOTSTRAP_API_KEY", settings.get("api_key", "sk-123456")).strip()
+    settings["image_mode"] = os.environ.get("BOOTSTRAP_IMAGE_MODE", settings.get("image_mode", "url")).strip()
+    settings["base_url"] = os.environ.get("BOOTSTRAP_BASE_URL", settings.get("base_url", "")).strip()
+    settings["proxy_url"] = os.environ.get("BOOTSTRAP_PROXY_URL", settings.get("proxy_url", "")).strip()
 
     timeout = os.environ.get("BOOTSTRAP_TIMEOUT")
     if timeout:
