@@ -187,6 +187,10 @@ class GeminiClient:
         return self._parse_response(resp.text)
 
     def _parse_response(self, text: str) -> ModelOutput:
+        def extract_generated_image_urls(raw_text: str) -> List[str]:
+            urls = re.findall(r'https://lh3\.googleusercontent\.com/gg-dl/[^\s"\\]+', raw_text)
+            return list(dict.fromkeys(urls))
+
         lines = text.splitlines()
         if len(lines) < 3:
              raise Exception("Invalid response format (too short)")
@@ -226,7 +230,26 @@ class GeminiClient:
                 except:
                     continue
         
+        fallback_urls = extract_generated_image_urls(text)
         if not main_part:
+            if fallback_urls:
+                return ModelOutput(
+                    metadata=[],
+                    candidates=[
+                        Candidate(
+                            rcid="",
+                            text="",
+                            generated_images=[
+                                GeneratedImage(
+                                    image=Image(url=url, title="[Generated Image]", alt=""),
+                                    cookies=self.cookies
+                                )
+                                for url in fallback_urls
+                            ]
+                        )
+                    ],
+                    chosen=0
+                )
             raise Exception("Failed to locate main response body")
 
         # Metadata
@@ -303,6 +326,13 @@ class GeminiClient:
                                              image=Image(url=url, title=title, alt=alt),
                                              cookies=self.cookies
                                          ))
+
+                if not generated_images:
+                    for url in extract_generated_image_urls(json.dumps(cand_raw, ensure_ascii=False)):
+                        generated_images.append(GeneratedImage(
+                            image=Image(url=url, title="[Generated Image]", alt=""),
+                            cookies=self.cookies
+                        ))
                 
                 # Check for card content replacement (rcid logic from Go)
                 # ... simplified for now
@@ -319,6 +349,19 @@ class GeminiClient:
                     web_images=web_images,
                     generated_images=generated_images
                 ))
+
+        if not candidates and fallback_urls:
+            candidates.append(Candidate(
+                rcid="",
+                text="",
+                generated_images=[
+                    GeneratedImage(
+                        image=Image(url=url, title="[Generated Image]", alt=""),
+                        cookies=self.cookies
+                    )
+                    for url in fallback_urls
+                ]
+            ))
 
         return ModelOutput(
             metadata=metadata,
