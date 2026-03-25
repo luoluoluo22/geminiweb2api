@@ -1,6 +1,6 @@
 from typing import List, Optional, Union, Dict, Any
 from fastapi import FastAPI, HTTPException, Depends, Header, Request, status
-from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, PlainTextResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -46,8 +46,13 @@ IMAGE_CACHE_DIR = os.environ.get(
 
 os.makedirs(IMAGE_CACHE_DIR, exist_ok=True)
 
-templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
+HAS_TEMPLATES = os.path.isdir(TEMPLATES_DIR)
+HAS_STATIC = os.path.isdir(STATIC_DIR)
+
+templates = Jinja2Templates(directory=TEMPLATES_DIR) if HAS_TEMPLATES else None
+if HAS_STATIC:
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 security = HTTPBearer(auto_error=False)
 
@@ -568,10 +573,14 @@ async def home():
 
 @app.get("/admin", response_class=HTMLResponse)
 async def admin_login(request: Request):
+    if not templates:
+        return PlainTextResponse("Admin template is unavailable in this deployment.", status_code=503)
     return templates.TemplateResponse(request, "login.html", {"request": request})
 
 @app.get("/manage", response_class=HTMLResponse)
 async def manage_page(request: Request):
+    if not templates:
+        return PlainTextResponse("Admin template is unavailable in this deployment.", status_code=503)
     return templates.TemplateResponse(request, "admin.html", {"request": request})
 
 # =============================================================================
