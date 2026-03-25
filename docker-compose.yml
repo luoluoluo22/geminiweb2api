@@ -1,0 +1,15 @@
+version: '3'
+services:
+  geminiweb2api:
+    image: lumia1998/geminiweb2api:latest
+    container_name: geminiweb2api
+    ports:
+      - "8000:8000"
+    volumes:
+      # Persist cookies and settings (cookies.json)
+      - ./data:/app/data
+      # Persist generated images cache
+      - ./images:/app/geminiweb2api/static/images
+    environment:
+      - TZ=Asia/Shanghai
+    restart: always

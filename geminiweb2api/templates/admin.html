@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="h-full">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>管理控制台 - GeminiWeb2API</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes slide-up {
+            from {
+                transform: translateY(100%);
+                opacity: 0
+            }
+
+            to {
+                transform: translateY(0);
+                opacity: 1
+            }
+        }
+
+        .animate-slide-up {
+            animation: slide-up .3s ease-out
+        }
+
+        .tab-btn {
+            transition: all .2s ease
+        }
+
+        .btn-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 0.375rem;
+            transition: color .2s, background-color .2s;
+            height: 2rem;
+            width: 2rem;
+        }
+
+        .btn-icon:hover {
+            background-color: hsl(0 0% 96.1%);
+            color: hsl(0 0% 9%)
+        }
+
+        .cfg-label {
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: hsl(0 0% 45.1%);
+            margin-bottom: 0.5rem;
+            display: block;
+        }
+
+        .cfg-input {
+            display: flex;
+            height: 2.25rem;
+            width: 100%;
+            border-radius: 0.375rem;
+            border: 1px solid hsl(0 0% 89%);
+            background-color: hsl(0 0% 100%);
+            padding: 0.5rem 0.75rem;
+            font-size: 0.875rem;
+        }
+
+        .cfg-input:focus {
+            outline: none;
+            border-color: hsl(0 0% 3.9%);
+        }
+    </style>
+    <script>
+        tailwind.config = { theme: { extend: { colors: { border: "hsl(0 0% 89%)", input: "hsl(0 0% 89%)", ring: "hsl(0 0% 3.9%)", background: "hsl(0 0% 100%)", foreground: "hsl(0 0% 3.9%)", primary: { DEFAULT: "hsl(0 0% 9%)", foreground: "hsl(0 0% 98%)" }, secondary: { DEFAULT: "hsl(0 0% 96.1%)", foreground: "hsl(0 0% 9%)" }, muted: { DEFAULT: "hsl(0 0% 96.1%)", foreground: "hsl(0 0% 45.1%)" }, accent: { DEFAULT: "hsl(0 0% 96.1%)", foreground: "hsl(0 0% 9%)" }, destructive: { DEFAULT: "hsl(0 84.2% 60.2%)", foreground: "hsl(0 0% 98%)" } } } } }
+    </script>
+</head>
+
+<body class="h-full bg-background text-foreground antialiased">
+    <!-- 导航栏 -->
+    <header
+        class="sticky top-0 z-50 w-full border-b border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+        <div class="mx-auto flex h-14 max-w-7xl items-center px-6">
+            <div class="mr-4 flex items-baseline gap-3">
+                <span class="font-bold text-xl">GeminiWeb2API</span>
+                <span class="text-xs text-gray-400">Gemini Web Proxy</span>
+            </div>
+            <div class="flex flex-1 items-center justify-end">
+                <nav class="flex items-center gap-1">
+                    <button onclick="logout()"
+                        class="inline-flex items-center justify-center text-xs transition-colors hover:bg-accent hover:text-accent-foreground h-7 px-2.5 gap-1">
+                        <svg class="h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+                            stroke="currentColor" stroke-width="2">
+                            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                            <polyline points="16 17 21 12 16 7" />
+                            <line x1="21" y1="12" x2="9" y2="12" />
+                        </svg>
+                        退出
+                    </button>
+                </nav>
+            </div>
+        </div>
+    </header>
+
+    <main class="mx-auto max-w-7xl px-6 py-6">
+        <!-- Tab 导航 -->
+        <div class="border-b border-border mb-6">
+            <nav class="flex space-x-8">
+                <button onclick="switchTab('cookies')" id="tabCookies"
+                    class="tab-btn border-b-2 border-primary text-sm font-medium py-3 px-1">Cookie 管理</button>
+                <button onclick="switchTab('settings')" id="tabSettings"
+                    class="tab-btn border-b-2 border-transparent text-sm font-medium py-3 px-1">Setting 配置</button>
+            </nav>
+        </div>
+
+        <!-- Cookie 管理面板 -->
+        <div id="panelCookies">
+            <!-- 统计卡片 -->
+            <div class="grid gap-4 grid-cols-2 md:grid-cols-4 mb-6">
+                <div class="rounded-lg border border-border bg-background p-4">
+                    <p class="text-sm font-medium text-muted-foreground mb-2">Cookie 总数</p>
+                    <h3 class="text-xl font-bold" id="statTotal">-</h3>
+                </div>
+                <div class="rounded-lg border border-border bg-background p-4">
+                    <p class="text-sm font-medium text-muted-foreground mb-2">Cookie 正常</p>
+                    <h3 class="text-xl font-bold text-green-600" id="statActive">-</h3>
+                </div>
+                <div class="rounded-lg border border-border bg-background p-4">
+                    <p class="text-sm font-medium text-muted-foreground mb-2">Cookie 未使用</p>
+                    <h3 class="text-xl font-bold text-gray-500" id="statUnused">-</h3>
+                </div>
+                <div class="rounded-lg border border-border bg-background p-4">
+                    <p class="text-sm font-medium text-muted-foreground mb-2">Cookie 失效</p>
+                    <h3 class="text-xl font-bold text-red-500" id="statFailed">-</h3>
+                </div>
+            </div>
+
+            <!-- Cookie 列表 -->
+            <div class="rounded-lg border border-border bg-background">
+                <!-- 工具栏 -->
+                <div class="flex items-center justify-between gap-4 p-4 border-b border-border">
+                    <div class="flex items-center gap-3 flex-1">
+                        <select id="filterStatus" onchange="filterCookies()"
+                            class="h-8 px-2 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring">
+                            <option value="all">全部状态</option>
+                            <option value="正常">正常</option>
+                            <option value="失效">失效</option>
+                        </select>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button onclick="openAddModal()"
+                            class="inline-flex items-center justify-center rounded-md transition-colors focus-visible:outline-none bg-primary text-primary-foreground hover:bg-primary/90 h-8 px-3">
+                            <svg class="h-4 w-4 mr-2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+                                stroke="currentColor" stroke-width="2">
+                                <line x1="12" y1="5" x2="12" y2="19" />
+                                <line x1="5" y1="12" x2="19" y2="12" />
+                            </svg>
+                            <span class="text-sm font-medium">新增</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 表格 -->
+                <div class="relative w-full overflow-auto">
+                    <table class="w-full text-sm table-fixed">
+                        <thead>
+                            <tr class="border-b border-border">
+                                <th
+                                    class="h-10 px-3 text-left align-middle text-sm font-medium text-muted-foreground w-48">
+                                    Cookie ID</th>
+                                <th
+                                    class="h-10 px-3 text-left align-middle text-sm font-medium text-muted-foreground w-20">
+                                    状态</th>
+                                <th
+                                    class="h-10 px-3 text-left align-middle text-sm font-medium text-muted-foreground w-20">
+                                    使用次数</th>
+                                <th
+                                    class="h-10 px-3 text-left align-middle text-sm font-medium text-muted-foreground w-40">
+                                    备注</th>
+                                <th
+                                    class="h-10 px-3 text-left align-middle text-sm font-medium text-muted-foreground w-32">
+                                    创建时间</th>
+                                <th
+                                    class="h-10 px-3 text-center align-middle text-sm font-medium text-muted-foreground w-28">
+                                    操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="cookieTableBody" class="divide-y divide-border">
+                            <!-- 动态填充 -->
+                        </tbody>
+                    </table>
+                </div>
+
+                <div id="emptyState" class="hidden flex flex-col items-center justify-center py-12">
+                    <svg class="h-10 w-10 text-muted-foreground/50 mb-3" xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="3" width="18" height="18" rx="2" />
+                        <path d="M9 9h6v6H9z" />
+                    </svg>
+                    <p class="text-sm text-muted-foreground">暂无数据</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Setting 配置面板 -->
+        <div id="panelSettings" class="hidden">
+            <div class="mb-8">
+                <div class="flex items-center justify-between mb-6">
+                    <h2 class="text-xl font-bold">全局配置</h2>
+                    <button onclick="saveSettings()"
+                        class="inline-flex items-center justify-center rounded-md text-sm font-medium bg-secondary text-secondary-foreground hover:bg-black hover:text-white h-9 px-4 transition-colors">保存配置</button>
+                </div>
+                <div class="grid gap-4 lg:grid-cols-3">
+                    <!-- 系统设置 -->
+                    <div class="rounded-lg border border-border bg-background p-6">
+                        <h3 class="text-sm font-semibold mb-4">系统设置</h3>
+                        <div class="space-y-4">
+                            <div>
+                                <label class="cfg-label">登录账户</label>
+                                <input id="cfgAdminUser" class="cfg-input" placeholder="admin">
+                            </div>
+                            <div>
+                                <label class="cfg-label">登录密码</label>
+                                <input id="cfgAdminPass" type="password" class="cfg-input" placeholder="留空则不修改">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 媒体设置 -->
+                    <div class="rounded-lg border border-border bg-background p-6">
+                        <h3 class="text-sm font-semibold mb-4">媒体设置</h3>
+                        <div class="space-y-4">
+                            <div>
+                                <label class="cfg-label">图片模式</label>
+                                <select id="cfgImageMode" class="cfg-input">
+                                    <option value="url">URL 链接</option>
+                                    <option value="base64">Base64</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="cfg-label">服务网址</label>
+                                <input id="cfgBaseUrl" class="cfg-input" placeholder="http://localhost:8001">
+                            </div>
+                            <div>
+                                <label class="cfg-label">图片缓存上限 (MB)</label>
+                                <input id="cfgImageCacheMaxSize" type="number" class="cfg-input" placeholder="512">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 缓存管理 -->
+                    <div class="rounded-lg border border-border bg-background p-6">
+                        <h3 class="text-sm font-semibold mb-4">缓存管理</h3>
+                        <div class="space-y-4">
+                            <div>
+                                <label class="cfg-label">当前图片缓存</label>
+                                <div class="flex gap-2">
+                                    <input id="imageCacheSize" readonly class="cfg-input bg-muted flex-1"
+                                        placeholder="0 MB">
+                                    <button onclick="clearCache()"
+                                        class="inline-flex items-center justify-center rounded-md text-sm font-medium bg-secondary text-secondary-foreground hover:bg-red-600 hover:text-white h-9 w-9 p-0 transition-colors"
+                                        title="清除缓存">
+                                        <svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
+                                            fill="none" stroke="currentColor" stroke-width="2">
+                                            <path
+                                                d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2M10 11v6M14 11v6" />
+                                        </svg>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Gemini 配置区域 -->
+            <div>
+                <div class="flex items-center justify-between mb-6">
+                    <h2 class="text-xl font-bold">Gemini 配置</h2>
+                </div>
+                <div class="grid gap-4 lg:grid-cols-3">
+                    <!-- API 设置 -->
+                    <div class="rounded-lg border border-border bg-background p-6">
+                        <h3 class="text-sm font-semibold mb-4">API 设置</h3>
+                        <div class="space-y-4">
+                            <div>
+                                <label class="cfg-label">API Key</label>
+                                <input id="cfgApiKey" class="cfg-input" placeholder="留空则不验证">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 代理设置 -->
+                    <div class="rounded-lg border border-border bg-background p-6">
+                        <h3 class="text-sm font-semibold mb-4">代理设置</h3>
+                        <div class="space-y-4">
+                            <div>
+                                <label class="cfg-label">Proxy URL</label>
+                                <input id="cfgProxyUrl" class="cfg-input" placeholder="http://127.0.0.1:7890">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 超时设置 -->
+                    <div class="rounded-lg border border-border bg-background p-6">
+                        <h3 class="text-sm font-semibold mb-4">超时设置</h3>
+                        <div class="space-y-4">
+                            <div>
+                                <label class="cfg-label">请求超时 (秒)</label>
+                                <input id="cfgTimeout" type="number" class="cfg-input" placeholder="120">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 插件连接区域 -->
+            <div>
+                <div class="flex items-center justify-between mb-6">
+                    <h2 class="text-xl font-bold">🔌 插件连接</h2>
+                </div>
+                <div class="rounded-lg border border-border bg-background p-6">
+                    <p class="text-sm text-muted-foreground mb-4">使用油猴脚本自动同步 Cookie。安装脚本后在 Gemini 页面配置以下信息：</p>
+                    <div class="space-y-4">
+                        <div>
+                            <label class="cfg-label">服务器地址</label>
+                            <div class="flex gap-2">
+                                <input id="pluginServerUrl" readonly class="cfg-input bg-muted flex-1">
+                                <button onclick="copyToClipboard(document.getElementById('pluginServerUrl').value)"
+                                    class="inline-flex items-center justify-center rounded-md text-sm font-medium bg-secondary text-secondary-foreground hover:bg-primary hover:text-primary-foreground h-9 px-3 transition-colors">
+                                    复制
+                                </button>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="cfg-label">连接 Token</label>
+                            <div class="flex gap-2">
+                                <input id="pluginToken" readonly class="cfg-input bg-muted flex-1">
+                                <button onclick="regeneratePluginToken()"
+                                    class="inline-flex items-center justify-center rounded-md text-sm font-medium bg-secondary text-secondary-foreground hover:bg-yellow-500 hover:text-white h-9 px-3 transition-colors"
+                                    title="重新生成 Token">
+                                    <svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
+                                        fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M23 4v6h-6"></path>
+                                        <path d="M1 20v-6h6"></path>
+                                        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15">
+                                        </path>
+                                    </svg>
+                                </button>
+                                <button onclick="copyToClipboard(document.getElementById('pluginToken').value)"
+                                    class="inline-flex items-center justify-center rounded-md text-sm font-medium bg-secondary text-secondary-foreground hover:bg-primary hover:text-primary-foreground h-9 px-3 transition-colors">
+                                    复制
+                                </button>
+                            </div>
+                        </div>
+                        <div class="pt-2 border-t border-border">
+                            <a href="https://github.com/lumia1998/gemini2webapi_cookie_auto" target="_blank"
+                                class="inline-flex items-center text-sm text-primary hover:underline">
+                                🔗 获取 Chrome 扩展
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- 添加 Cookie 模态框 -->
+    <div id="addModal" class="hidden fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+        <div
+            class="bg-background rounded-lg border border-border w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-xl">
+            <div class="flex items-center justify-between p-5 border-b border-border">
+                <h3 class="text-lg font-semibold">添加 Cookie</h3>
+                <button onclick="closeAddModal()" class="text-muted-foreground hover:text-foreground transition-colors">
+                    <svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18" />
+                        <line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
+                </button>
+            </div>
+            <div class="p-5 space-y-4">
+                <div class="space-y-2">
+                    <label class="text-sm font-medium text-muted-foreground">完整 Cookie 字符串</label>
+                    <textarea id="addCookieInput" rows="6"
+                        placeholder="粘贴从浏览器复制的完整Cookie字符串...&#10;&#10;获取方法：&#10;1. 登录 https://gemini.google.com&#10;2. F12 打开开发者工具 -> Application -> Cookies&#10;3. 右键任意cookie -> Copy all as Header String"
+                        class="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring resize-none font-mono"></textarea>
+                </div>
+                <div class="space-y-2">
+                    <label class="text-sm font-medium text-muted-foreground">备注 (可选)</label>
+                    <input id="addNoteInput" class="cfg-input" placeholder="例如: 账号1">
+                </div>
+            </div>
+            <div class="flex items-center justify-end gap-3 p-5 border-t border-border bg-muted/30">
+                <button onclick="closeAddModal()"
+                    class="inline-flex items-center justify-center rounded-md text-sm font-medium border border-input bg-background hover:bg-accent h-9 px-5">取消</button>
+                <button onclick="submitAddCookie()"
+                    class="inline-flex items-center justify-center rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 h-9 px-5">添加</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 全局变量
+        let cookieData = [];
+        const token = localStorage.getItem('adminToken');
+
+        // 未登录则跳转
+        if (!token) location.href = '/admin';
+
+        // API 请求
+        async function api(url, options = {}) {
+            const headers = { 'Content-Type': 'application/json', ...options.headers };
+            if (token) headers['Authorization'] = `Bearer ${token}`;
+            const resp = await fetch(url, { ...options, headers });
+            if (resp.status === 401) { localStorage.removeItem('adminToken'); location.href = '/admin'; return null; }
+            return resp.json();
+        }
+
+        // Toast 提示
+        function showToast(m, t = 'info') {
+            const d = document.createElement('div');
+            const bc = { success: 'bg-green-600', error: 'bg-red-600', info: 'bg-primary' };
+            d.className = `fixed bottom-4 right-4 ${bc[t] || bc.info} text-white px-4 py-2.5 rounded-lg shadow-lg text-sm font-medium z-50 animate-slide-up`;
+            d.textContent = m;
+            document.body.appendChild(d);
+            setTimeout(() => { d.style.opacity = '0'; d.style.transition = 'opacity .3s'; setTimeout(() => d.remove(), 300); }, 2000);
+        }
+
+        // Tab 切换
+        function switchTab(tab) {
+            document.getElementById('panelCookies').classList.toggle('hidden', tab !== 'cookies');
+            document.getElementById('panelSettings').classList.toggle('hidden', tab !== 'settings');
+            document.getElementById('tabCookies').classList.toggle('border-primary', tab === 'cookies');
+            document.getElementById('tabCookies').classList.toggle('border-transparent', tab !== 'cookies');
+            document.getElementById('tabSettings').classList.toggle('border-primary', tab === 'settings');
+            document.getElementById('tabSettings').classList.toggle('border-transparent', tab !== 'settings');
+            if (tab === 'settings') {
+                loadSettings();
+                // Set plugin server URL
+                document.getElementById('pluginServerUrl').value = window.location.origin + '/api/plugin/update-cookie';
+            }
+        }
+
+        // 复制到剪贴板
+        function copyToClipboard(text) {
+            if (!text) { showToast('没有可复制的内容', 'error'); return; }
+            navigator.clipboard.writeText(text).then(() => {
+                showToast('已复制到剪贴板', 'success');
+            }).catch(() => {
+                showToast('复制失败', 'error');
+            });
+        }
+
+        // 加载 Cookie 列表
+        async function loadCookies() {
+            const resp = await api('/api/cookies');
+            if (!resp?.success) return;
+            cookieData = resp.data || [];
+            renderCookies();
+            loadStats();
+        }
+
+        // 加载统计
+        async function loadStats() {
+            const resp = await api('/api/stats');
+            if (!resp?.success) return;
+            document.getElementById('statTotal').textContent = resp.total;
+            document.getElementById('statActive').textContent = resp.active;
+            document.getElementById('statUnused').textContent = resp.unused;
+            document.getElementById('statFailed').textContent = resp.failed;
+        }
+
+        // 渲染 Cookie 表格
+        function renderCookies() {
+            const filter = document.getElementById('filterStatus').value;
+            let filtered = cookieData;
+            if (filter !== 'all') filtered = cookieData.filter(c => c.status === filter);
+
+            const tbody = document.getElementById('cookieTableBody');
+            const empty = document.getElementById('emptyState');
+
+            if (filtered.length === 0) {
+                tbody.innerHTML = '';
+                empty.classList.remove('hidden');
+                return;
+            }
+
+            empty.classList.add('hidden');
+            tbody.innerHTML = filtered.map(c => `
+                <tr class="hover:bg-muted/50">
+                    <td class="p-3 font-mono text-xs">${c.cookie_id.substring(0, 20)}...</td>
+                    <td class="p-3"><span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${c.status === '正常' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}">${c.status}</span></td>
+                    <td class="p-3">${c.use_count}</td>
+                    <td class="p-3 text-muted-foreground text-xs">${c.note || '-'}</td>
+                    <td class="p-3 text-xs text-muted-foreground">${c.created_time ? new Date(c.created_time * 1000).toLocaleString() : '-'}</td>
+                    <td class="p-3 text-center">
+                        <button onclick="deleteCookie('${c.cookie_id}')" class="btn-icon hover:text-destructive" title="删除">
+                            <svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="3 6 5 6 21 6"/>
+                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                            </svg>
+                        </button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        function filterCookies() { renderCookies(); }
+
+        // 添加 Cookie
+        function openAddModal() { document.getElementById('addModal').classList.remove('hidden'); document.getElementById('addCookieInput').value = ''; document.getElementById('addNoteInput').value = ''; }
+        function closeAddModal() { document.getElementById('addModal').classList.add('hidden'); }
+
+        async function submitAddCookie() {
+            const cookieStr = document.getElementById('addCookieInput').value.trim();
+            const note = document.getElementById('addNoteInput').value.trim();
+            if (!cookieStr) { showToast('请输入Cookie', 'error'); return; }
+            const resp = await api('/api/cookies/add', { method: 'POST', body: JSON.stringify({ cookie_str: cookieStr, note: note }) });
+            if (resp?.success) { showToast('添加成功', 'success'); closeAddModal(); loadCookies(); } else { showToast(resp?.message || '添加失败', 'error'); }
+        }
+
+        // 删除 Cookie
+        async function deleteCookie(id) {
+            if (!confirm('确定删除此 Cookie?')) return;
+            const resp = await api(`/api/cookies/${id}`, { method: 'DELETE' });
+            if (resp?.success) { showToast('删除成功', 'success'); loadCookies(); } else { showToast(resp?.message || '删除失败', 'error'); }
+        }
+
+        // 加载设置
+        async function loadSettings() {
+            const resp = await api('/api/settings');
+            if (!resp?.success) return;
+            document.getElementById('cfgAdminUser').value = resp.data.admin_username || '';
+            document.getElementById('cfgApiKey').value = resp.data.api_key || '';
+            document.getElementById('cfgImageMode').value = resp.data.image_mode || 'url';
+            document.getElementById('cfgBaseUrl').value = resp.data.base_url || '';
+            document.getElementById('cfgImageCacheMaxSize').value = resp.data.image_cache_max_size || '';
+            document.getElementById('cfgProxyUrl').value = resp.data.proxy_url || '';
+            document.getElementById('cfgTimeout').value = resp.data.timeout || '';
+            document.getElementById('pluginToken').value = resp.data.plugin_token || '';
+            document.getElementById('imageCacheSize').value = resp.data.current_cache_size || '0 MB';
+        }
+
+        // 重新生成插件 Token
+        async function regeneratePluginToken() {
+            if (!confirm('确定要重新生成 Token 吗？旧 Token 将失效！')) return;
+            const resp = await api('/api/settings/plugin-token/regenerate', { method: 'POST' });
+            if (resp?.success) {
+                document.getElementById('pluginToken').value = resp.token;
+                showToast('Token 已重新生成', 'success');
+            } else {
+                showToast(resp?.message || '操作失败', 'error');
+            }
+        }
+
+        // 保存设置
+        async function saveSettings() {
+            const data = {
+                admin_username: document.getElementById('cfgAdminUser').value.trim(),
+                admin_password: document.getElementById('cfgAdminPass').value.trim(),
+                api_key: document.getElementById('cfgApiKey').value.trim(),
+                image_mode: document.getElementById('cfgImageMode').value,
+                base_url: document.getElementById('cfgBaseUrl').value.trim(),
+                image_cache_max_size: parseInt(document.getElementById('cfgImageCacheMaxSize').value) || 512,
+                proxy_url: document.getElementById('cfgProxyUrl').value.trim(),
+                timeout: parseInt(document.getElementById('cfgTimeout').value) || 120
+            };
+            const resp = await api('/api/settings', { method: 'POST', body: JSON.stringify(data) });
+            if (resp?.success) { showToast('保存成功', 'success'); } else { showToast(resp?.message || '保存失败', 'error'); }
+        }
+
+        // 清除缓存
+        async function clearCache() {
+            if (!confirm('确定清除所有图片缓存?')) return;
+            const resp = await api('/api/cache/clear', { method: 'POST' });
+            if (resp?.success) { showToast('缓存已清除', 'success'); loadSettings(); } else { showToast(resp?.message || '清除失败', 'error'); }
+        }
+
+        // 退出登录
+        function logout() { localStorage.removeItem('adminToken'); location.href = '/login'; }
+
+        // 初始化
+        loadCookies();
+    </script>
+</body>
+
+</html>
