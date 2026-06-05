@@ -207,7 +207,8 @@ class GeminiClient:
                      if isinstance(t, list) and len(t) > 0:
                          data = t
                          break
-                 except: continue
+                 except:
+                     continue
         
         if not data:
             raise Exception("No valid JSON data found in response")
@@ -220,7 +221,7 @@ class GeminiClient:
         response_json = data
         main_part = None
 
-        for item in response_json:
+        for item in reversed(response_json):
             if isinstance(item, list) and len(item) > 2 and isinstance(item[2], str):
                 try:
                     inner = json.loads(item[2])
