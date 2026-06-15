@@ -4,7 +4,7 @@ from openai import OpenAI
 # 默认设置中 api_key 是 "sk-123456"，如果在后台修改过请替换
 API_KEY = "sk-123456"
 # 服务地址
-BASE_URL = "https://gemini.luoluoluo.cc.cd/v1"
+BASE_URL = "https://geminiweb2api.vercel.app/v1"
 
 client = OpenAI(
     api_key=API_KEY,
