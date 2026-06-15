@@ -1187,7 +1187,7 @@ class ChatCompletionResponse(BaseModel):
     usage: Dict[str, int]
 
 class ImageGenerationRequest(BaseModel):
-    model: str = "gemini-3.0-flash"
+    model: str = "gemini-3.5-flash"
     prompt: str
     n: int = 1
     response_format: str = "url"

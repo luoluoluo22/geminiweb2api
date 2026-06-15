@@ -152,61 +152,71 @@ Upstash 创建步骤：
 
 ---
 
+## 🤖 支持的模型
+
+本项目支持以下 Gemini 模型，在 API 请求中填入相应的 `model` 名称即可：
+
+| 模型 ID | 说明 | 特点 |
+| :--- | :--- | :--- |
+| `gemini-3.5-flash` | **默认模型**，最新一代 Flash 模型 | 极速响应，适合大部分日常对话和轻量多模态任务 |
+| `gemini-3.5-flash-thinking` | 带有思考过程的 3.5 Flash 模型 | 展示详细思维链，推理更强，适合逻辑分析和写代码 |
+| `gemini-3.1-pro` | 3.1 专业版模型 | 适合复杂的长文本处理、深度代码编写和精细指令遵循 |
+| `gemini-3.1-pro-thinking` | 带有思考过程的 3.1 Pro 推理模型 | 顶级推理能力，超强数学、科学、编码和长文本推理 |
+| `gemini-3.1-flash-lite` | 3.1 轻量快速模型 | 资源消耗极低，响应速度最快，适合超高频次低复杂度任务 |
+| `gemini-3.1-flash-lite-thinking`| 带有思考过程的 3.1 Flash-Lite 模型 | 兼顾低成本极速响应与简单思考逻辑 |
+
+> [!NOTE]
+> - 当请求的模型在 Google 端遭遇容量限制或请求失败时，网关内置了智能降级机制，会自动切换到相应的 Fallback 模型，尽最大可能保证 API 调用的可用性。
+> - 系统提示词（System Prompt）和多轮历史对话上下文在后端已被完美解析并拼接注入，可以直接在各大客户端中使用。
+
+---
+
 ## 📡 API 调用示例
 
-### OpenAI Python SDK
+由于本项目与 OpenAI 兼容，因此可以直接使用 OpenAI 的 SDK 或第三方客户端调用。
 
+### Python SDK 调用示例
 ```python
 from openai import OpenAI
 
 client = OpenAI(
-    base_url="http://localhost:8000/v1",
-    api_key="你在后台设置的API_KEY"
+    api_key="your-bootstrap-api-key",  # 填入您在 Settings 页面配置的 API Key
+    base_url="http://localhost:8000/v1" # 填入您的服务地址，注意加上 /v1
 )
 
-# 1. 文本对话
+# 文本与对话测试（流式返回）
 response = client.chat.completions.create(
-    model="gemini-3.0-pro",
-    messages=[{"role": "user", "content": "你好"}]
+    model="gemini-3.5-flash",  # 默认模型，也可以使用 gemini-3.5-flash-thinking 等
+    messages=[
+        {"role": "system", "content": "你是一个严谨的助手。"},
+        {"role": "user", "content": "请解释一下什么是量子纠缠？"}
+    ],
+    stream=True
 )
-print(response.choices[0].message.content)
 
-# 2. 图片生成 (Gemini 会返回图片链接)
-response = client.chat.completions.create(
-    model="gemini-3.0-pro",
-    messages=[{"role": "user", "content": "画一只戴墨镜的猫"}]
-)
-print(response.choices[0].message.content)
-# 输出示例: 
-# 好的，这是一只戴墨镜的猫：
-# ![Generated Image](http://localhost:8000/static/images/img_xxxx.png)
-
-# 3. 多模态 (图片理解/参考图生成)
-# 需要将图片转为 Base64 或使用 URL
-response = client.chat.completions.create(
-    model="gemini-3.0-pro",
-    messages=[{
-        "role": "user",
-        "content": [
-            {"type": "text", "text": "这张图里有什么？"},
-            {"type": "image_url", "image_url": {"url": "https://example.com/image.jpg"}}
-        ]
-    }]
-)
-print(response.choices[0].message.content)
+for chunk in response:
+    if chunk.choices and chunk.choices[0].delta.content:
+        print(chunk.choices[0].delta.content, end="", flush=True)
 ```
 
-### 支持的模型
-
-- `gemini-3.0-flash`
-- `gemini-3.0-pro`
-- `gemini-3.0-flash-thinking`
+### cURL 调用示例
+```bash
+curl http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer your-bootstrap-api-key" \
+  -d '{
+    "model": "gemini-3.5-flash",
+    "messages": [
+      {"role": "user", "content": "你好，请介绍下你自己"}
+    ],
+    "stream": false
+  }'
+```
 
 ---
 
-## 🛠️ 目录结构
-
-```
+## 📂 项目目录结构
+```text
 /app
 ├── data/              # 数据持久化目录
 │   └── cookies.json   # 存储 Cookie 和配置

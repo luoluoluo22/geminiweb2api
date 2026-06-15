@@ -485,5 +485,5 @@ class GeminiClient:
             chosen=0
         )
 
-    def start_chat(self, model: str = "gemini-3.0-pro", gem_id: Optional[str] = None) -> ChatSession:
+    def start_chat(self, model: str = "gemini-3.5-flash", gem_id: Optional[str] = None) -> ChatSession:
         return ChatSession(self, model, gem_id)
