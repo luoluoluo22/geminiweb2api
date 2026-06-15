@@ -1476,11 +1476,39 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
     if not req.messages:
         raise HTTPException(status_code=400, detail="No messages provided")
     
+    # 提取系统提示词和历史消息
+    system_msgs = [m for m in req.messages if m.role == "system"]
+    history_msgs = [m for m in req.messages[:-1] if m.role in ("user", "assistant")]
+    
     last_msg = req.messages[-1]
     
     # Extract text and images from multimodal content
     prompt, input_files = extract_content_and_files(last_msg.content)
     temp_files = [p for p in input_files if os.path.dirname(p) == IMAGE_CACHE_DIR]
+    
+    # 组装完整的提示词以支持系统提示词和多轮对话上下文
+    context_parts = []
+    if system_msgs:
+        system_contents = []
+        for s_msg in system_msgs:
+            s_text, _ = extract_content_and_files(s_msg.content)
+            if s_text:
+                system_contents.append(s_text)
+        if system_contents:
+            context_parts.append("[System Instruction]\n" + "\n".join(system_contents))
+            
+    if history_msgs:
+        history_text_parts = []
+        for msg in history_msgs:
+            role_label = "User" if msg.role == "user" else "Model"
+            h_text, _ = extract_content_and_files(msg.content)
+            if h_text:
+                history_text_parts.append(f"{role_label}: {h_text}")
+        if history_text_parts:
+            context_parts.append("[Conversation History]\n" + "\n".join(history_text_parts))
+            
+    if context_parts:
+        prompt = "\n\n".join(context_parts) + f"\n\nUser: {prompt}"
     
     # Get settings for proxy
     settings = get_settings()

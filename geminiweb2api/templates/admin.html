@@ -133,13 +133,43 @@
                 </div>
                 
                 <!-- 可用模型 -->
-                <div class="space-y-1.5">
+                <div class="space-y-1.5 relative">
                     <div class="flex items-center justify-between">
                         <label class="text-xs font-semibold text-gray-500">模型列表</label>
-                        <button onclick="copyModelList()" class="text-xs text-blue-600 hover:text-blue-800 transition font-medium">复制 JSON</button>
+                        <div class="flex gap-2">
+                            <button onclick="toggleModelsDropdown()" class="text-xs text-blue-600 hover:text-blue-800 transition font-medium">展开查看</button>
+                            <button onclick="copyModelList()" class="text-xs text-blue-600 hover:text-blue-800 transition font-medium">复制 JSON</button>
+                        </div>
                     </div>
                     <div class="flex items-center gap-2 bg-gray-50 border border-border rounded-md px-2.5 py-1.5">
                         <input id="quickModels" readonly class="bg-transparent border-none outline-none text-xs w-full font-mono text-gray-700 truncate" value="gemini-3.1-pro, gemini-3.5-flash...">
+                    </div>
+                    <!-- 模型折叠面板 -->
+                    <div id="modelsDropdown" class="hidden absolute left-0 right-0 top-full mt-1 bg-white border border-border rounded-md shadow-lg z-50 p-2 space-y-1 max-h-48 overflow-y-auto">
+                        <div class="flex items-center justify-between p-1 hover:bg-gray-50 rounded transition">
+                            <span class="text-xs font-mono text-gray-700">gemini-3.1-flash-lite</span>
+                            <button onclick="copyToClipboard('gemini-3.1-flash-lite')" class="text-[10px] text-gray-500 hover:text-primary border border-gray-200 px-1.5 py-0.5 rounded bg-white">复制</button>
+                        </div>
+                        <div class="flex items-center justify-between p-1 hover:bg-gray-50 rounded transition">
+                            <span class="text-xs font-mono text-gray-700">gemini-3.1-flash-lite-thinking</span>
+                            <button onclick="copyToClipboard('gemini-3.1-flash-lite-thinking')" class="text-[10px] text-gray-500 hover:text-primary border border-gray-200 px-1.5 py-0.5 rounded bg-white">复制</button>
+                        </div>
+                        <div class="flex items-center justify-between p-1 hover:bg-gray-50 rounded transition">
+                            <span class="text-xs font-mono text-gray-700">gemini-3.5-flash</span>
+                            <button onclick="copyToClipboard('gemini-3.5-flash')" class="text-[10px] text-gray-500 hover:text-primary border border-gray-200 px-1.5 py-0.5 rounded bg-white">复制</button>
+                        </div>
+                        <div class="flex items-center justify-between p-1 hover:bg-gray-50 rounded transition">
+                            <span class="text-xs font-mono text-gray-700">gemini-3.5-flash-thinking</span>
+                            <button onclick="copyToClipboard('gemini-3.5-flash-thinking')" class="text-[10px] text-gray-500 hover:text-primary border border-gray-200 px-1.5 py-0.5 rounded bg-white">复制</button>
+                        </div>
+                        <div class="flex items-center justify-between p-1 hover:bg-gray-50 rounded transition">
+                            <span class="text-xs font-mono text-gray-700">gemini-3.1-pro</span>
+                            <button onclick="copyToClipboard('gemini-3.1-pro')" class="text-[10px] text-gray-500 hover:text-primary border border-gray-200 px-1.5 py-0.5 rounded bg-white">复制</button>
+                        </div>
+                        <div class="flex items-center justify-between p-1 hover:bg-gray-50 rounded transition">
+                            <span class="text-xs font-mono text-gray-700">gemini-3.1-pro-thinking</span>
+                            <button onclick="copyToClipboard('gemini-3.1-pro-thinking')" class="text-[10px] text-gray-500 hover:text-primary border border-gray-200 px-1.5 py-0.5 rounded bg-white">复制</button>
+                        </div>
                     </div>
                 </div>
                 
@@ -639,6 +669,23 @@
                 showToast('复制失败', 'error');
             });
         }
+
+        function toggleModelsDropdown() {
+            const dropdown = document.getElementById('modelsDropdown');
+            dropdown.classList.toggle('hidden');
+        }
+
+        // 点击外部关闭模型下拉菜单
+        document.addEventListener('click', function(event) {
+            const dropdown = document.getElementById('modelsDropdown');
+            if (!dropdown) return;
+            const toggleBtn = event.target.closest('button');
+            const isToggleBtn = toggleBtn && toggleBtn.getAttribute('onclick') && toggleBtn.getAttribute('onclick').includes('toggleModelsDropdown');
+            const isClickInside = dropdown.contains(event.target) || isToggleBtn;
+            if (!isClickInside && !dropdown.classList.contains('hidden')) {
+                dropdown.classList.add('hidden');
+            }
+        });
 
         // 快捷面板复制
         function copyBaseUrl() {
