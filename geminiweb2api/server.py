@@ -1110,12 +1110,18 @@ class Message(BaseModel):
     role: str
     content: Union[str, List[Dict[str, Any]]]  # Can be string or array of content parts
 
+    class Config:
+        extra = "ignore"
+
 class ChatCompletionRequest(BaseModel):
     model: str
     messages: List[Message]
     stream: bool = False
     max_tokens: Optional[int] = None
     temperature: Optional[float] = None
+
+    class Config:
+        extra = "ignore"
 
 class ChatCompletionResponseChoice(BaseModel):
     index: int
@@ -1136,6 +1142,9 @@ class ImageGenerationRequest(BaseModel):
     n: int = 1
     response_format: str = "url"
     size: Optional[str] = None
+
+    class Config:
+        extra = "ignore"
 
 def run_gemini_request(
     model: str,
