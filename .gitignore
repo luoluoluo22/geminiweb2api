@@ -25,7 +25,7 @@ env/
 venv/
 ENV/
 env.bak/
-venv.bak/
+env.bak/
 
 # Data
 data/
@@ -36,3 +36,4 @@ server_stdout.log
 server_stderr.log
 
 .vercel
+test_api.py
