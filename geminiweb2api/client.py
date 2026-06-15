@@ -5,11 +5,60 @@ import random
 import string
 import re
 import os
+import requests
+import json
+import time
+import random
+import string
+import re
+import os
 from typing import List, Optional, Dict, Any, Union, Callable
 from .constants import Endpoints, Headers, ErrorCode
 from .models import ModelOutput, Candidate, WebImage, GeneratedImage, Image
 from .auth import get_access_token, rotate_1psidts, AuthError
 from .conversation import ChatSession
+
+MODEL_MAPPINGS = {
+    # 3.1 Flash-Lite
+    "gemini-3.1-flash-lite": {
+        "model_id": "8c46e95b1a07cecc",
+        "capacity_tail": 1,
+        "fallback_id": "fbb127bbb056c959",
+        "fallback_tail": 1
+    },
+    "gemini-3.1-flash-lite-thinking": {
+        "model_id": "797f3d0293f288ad",
+        "capacity_tail": 4,
+        "fallback_id": "5bf011840784117a",
+        "fallback_tail": 1
+    },
+    # 3.5 Flash
+    "gemini-3.5-flash": {
+        "model_id": "56fdd199312815e2",
+        "capacity_tail": 4,
+        "fallback_id": "fbb127bbb056c959",
+        "fallback_tail": 1
+    },
+    "gemini-3.5-flash-thinking": {
+        "model_id": "e051ce1aa80aa576",
+        "capacity_tail": 4,
+        "fallback_id": "5bf011840784117a",
+        "fallback_tail": 1
+    },
+    # 3.1 Pro
+    "gemini-3.1-pro": {
+        "model_id": "e6fa609c3fa255c0",
+        "capacity_tail": 4,
+        "fallback_id": "9d8ca3786ebdfbea",
+        "fallback_tail": 1
+    },
+    "gemini-3.1-pro-thinking": {
+        "model_id": "797f3d0293f288ad",
+        "capacity_tail": 4,
+        "fallback_id": "5bf011840784117a",
+        "fallback_tail": 1
+    }
+}
 
 class GeminiClient:
     def __init__(
@@ -40,6 +89,9 @@ class GeminiClient:
         self.running = False
         self.on_cookies_updated = on_cookies_updated
         self.timeout = timeout
+        
+        self.email = "未知"
+        self.tier = "未知"
         
         if proxy:
             self.session.proxies.update({"http": proxy, "https": proxy})
@@ -82,6 +134,42 @@ class GeminiClient:
             self.running = True
             if self.on_cookies_updated:
                 self.on_cookies_updated(valid_cookies)
+                
+            # 1. 抓取 email
+            try:
+                # 访问 init page 提取邮箱
+                init_resp = self.session.get("https://gemini.google.com/app", timeout=timeout or 15)
+                email_match = re.search(r'"oPEP7c"\s*:\s*"([^"]+)"', init_resp.text)
+                if email_match:
+                    self.email = email_match.group(1)
+                else:
+                    self.email = "未知账户"
+            except Exception as e:
+                print(f"Failed to extract email in init: {e}")
+                self.email = "未知账户"
+                
+            # 2. 侦测账户级别 (tier)
+            try:
+                req_payload = [[["otAQ7b", "[]", None, "generic"]]]
+                params = {
+                    "rpcids": "otAQ7b",
+                    "f.req": json.dumps(req_payload),
+                    "at": self.access_token
+                }
+                headers = Headers.Gemini.copy()
+                resp = self.session.post(
+                    "https://gemini.google.com/_/BardChatUi/data/batchexecute", 
+                    data=params, 
+                    timeout=timeout or 15
+                )
+                if "e6fa609c3fa255c0" in resp.text:
+                    self.tier = "Advanced 高级版"
+                else:
+                    self.tier = "Free 免费版"
+            except Exception as e:
+                print(f"Failed to detect tier in init: {e}")
+                self.tier = "未知"
+                
         except AuthError as e:
             raise e 
         except Exception as e:
@@ -97,8 +185,6 @@ class GeminiClient:
             raise Exception(f"File not found: {path}")
 
         filename = os.path.basename(path)
-        # Headers specifically for upload
-        # Do NOT use Headers.Gemini as base because it has Host: gemini.google.com
         headers = Headers.Upload.copy()
         headers["User-Agent"] = Headers.Gemini["User-Agent"]
         
@@ -152,6 +238,8 @@ class GeminiClient:
             # append gemID -> len 20 (index 19)
             inner.extend([None] * 16)
             inner.append(gem_id)
+
+
             
         inner_json = json.dumps(inner)
         outer = [None, inner_json]
@@ -163,18 +251,45 @@ class GeminiClient:
         }
         
         headers = Headers.Gemini.copy()
-        # Add model specific headers if needed (simplified here)
         
+        model_info = MODEL_MAPPINGS.get(model)
+        model_id = model_info["model_id"] if model_info else None
+        capacity_tail = model_info["capacity_tail"] if model_info else None
+        
+        if model_info:
+            headers["x-goog-ext-525001261-jspb"] = f'[1,null,null,null,"{model_id}",null,null,0,[4],null,null,{capacity_tail}]'
+            headers["x-goog-ext-73010989-jspb"] = "[0]"
+            headers["x-goog-ext-73010990-jspb"] = "[0]"
+            
+        resp = None
         try:
-            resp = self.session.post(
-                Endpoints.Generate, 
-                data=params, 
-                headers=headers, 
-                timeout=self.timeout
-            )
-            resp.raise_for_status()
+            try:
+                resp = self.session.post(
+                    Endpoints.Generate, 
+                    data=params, 
+                    headers=headers, 
+                    timeout=self.timeout
+                )
+                resp.raise_for_status()
+            except Exception as e:
+                # 触发自动降级逻辑
+                if model_info and "fallback_id" in model_info:
+                    fb_id = model_info["fallback_id"]
+                    fb_tail = model_info["fallback_tail"]
+                    print(f"Request failed for model {model} ({e}). Retrying with fallback: {fb_id}...")
+                    
+                    headers["x-goog-ext-525001261-jspb"] = f'[1,null,null,null,"{fb_id}",null,null,0,[4],null,null,{fb_tail}]'
+                    resp = self.session.post(
+                        Endpoints.Generate, 
+                        data=params, 
+                        headers=headers, 
+                        timeout=self.timeout
+                    )
+                    resp.raise_for_status()
+                else:
+                    raise e
         except requests.HTTPError as e:
-            if e.response.status_code == 429:
+            if e.response is not None and e.response.status_code == 429:
                 raise Exception("Too many requests (429)")
             raise e
         finally:

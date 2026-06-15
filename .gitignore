@@ -37,3 +37,9 @@ server_stderr.log
 
 .vercel
 test_api.py
+scratch/
+*.log
+debug_*.txt
+sample_*.txt
+scratch_*.txt
+vercel_*.txt

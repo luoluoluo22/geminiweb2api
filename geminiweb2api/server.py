@@ -261,6 +261,8 @@ def normalize_cookie_record(cookie_id: str, cookie_data: Dict[str, Any]) -> Dict
     cookie_data.setdefault("last_refresh_time", 0)
     cookie_data.setdefault("last_check_time", 0)
     cookie_data.setdefault("cooldown_until", 0)
+    cookie_data.setdefault("email", "未知账户")
+    cookie_data.setdefault("tier", "未知")
     if "created_time" not in cookie_data:
         created_at = cookie_data.get("created_at")
         if created_at:
@@ -738,6 +740,11 @@ def get_candidate_cookies(excluded_ids: Optional[set] = None) -> List[tuple[str,
     candidates: List[tuple[str, Dict[str, Any]]] = []
     for cookie_id, cookie_data in get_cookies().items():
         normalize_cookie_record(cookie_id, cookie_data)
+        # 自动解冻限额已过期的 Cookie
+        if cookie_data.get("status") == "额度超限" and cookie_data.get("cooldown_until", 0) <= now:
+            cookie_data["status"] = "正常"
+            update_cookie_record(cookie_id, status="正常", cooldown_until=0)
+            
         if cookie_id in excluded_ids:
             continue
         if cookie_data.get("cooldown_until", 0) > now:
@@ -801,7 +808,13 @@ def refresh_cookie_state(
         return False, str(e)
 
     persist_cookie_state(cookie_id, valid_cookies)
-    update_cookie_record(cookie_id, last_refresh_time=now, last_check_time=now)
+    update_cookie_record(
+        cookie_id, 
+        last_refresh_time=now, 
+        last_check_time=now,
+        email=client.email,
+        tier=client.tier
+    )
     return True, "ok"
 
 # =============================================================================
@@ -1208,30 +1221,46 @@ def run_gemini_request(
         except Exception as e:
             last_error = e
             error_msg = str(e).lower()
+            
+            # 检测是否为额度超限错误
+            is_limit_error = any(kw in error_msg for kw in ["1037", "limit exceeded", "too many requests", "429"])
+            if is_limit_error:
+                print(f"Cookie {cookie_id[:8]}... usage limit exceeded. Cool down for 5 hours.")
+                update_cookie_record(
+                    cookie_id,
+                    status="额度超限",
+                    cooldown_until=int(time.time()) + 18000,
+                    last_error=f"Usage limit exceeded: {str(e)[:200]}",
+                    last_check_time=int(time.time())
+                )
+            
             is_retryable = any(keyword in error_msg for keyword in [
                 "503", "401", "unauthorized", "auth", "cookie", "token", "psid", "expired"
             ])
 
-            if is_retryable:
+            if is_retryable or is_limit_error:
                 print(f"Attempt {attempt + 1}/{max_retries} failed with cookie {cookie_id[:8]}...: {e}")
-                recovered, recovered_reason = refresh_cookie_state(
-                    cookie_id,
-                    get_cookies().get(cookie_id, cookie_data),
-                    proxy=proxy,
-                    timeout=timeout,
-                    force=True
-                )
-                if recovered:
-                    update_cookie_record(
+                if is_retryable:
+                    recovered, recovered_reason = refresh_cookie_state(
                         cookie_id,
-                        status="待恢复",
-                        failure_count=max(0, cookie_data.get("failure_count", 0)),
-                        cooldown_until=0,
-                        last_error=f"Recovered after: {str(e)[:200]}",
-                        last_check_time=int(time.time())
+                        get_cookies().get(cookie_id, cookie_data),
+                        proxy=proxy,
+                        timeout=timeout,
+                        force=True
                     )
-                else:
-                    mark_cookie_failed(cookie_id, f"{e} | refresh: {recovered_reason}")
+                    if recovered:
+                        update_cookie_record(
+                            cookie_id,
+                            status="待恢复",
+                            failure_count=max(0, cookie_data.get("failure_count", 0)),
+                            cooldown_until=0,
+                            last_error=f"Recovered after: {str(e)[:200]}",
+                            last_check_time=int(time.time())
+                        )
+                    else:
+                        mark_cookie_failed(cookie_id, f"{e} | refresh: {recovered_reason}")
+                # 继续尝试下一个 Cookie 账号
+                continue
             else:
                 mark_cookie_failed(cookie_id, str(e))
                 raise HTTPException(status_code=500, detail=str(e))
@@ -1593,9 +1622,12 @@ def list_models():
     return {
         "object": "list",
         "data": [
-            {"id": "gemini-3.0-flash", "object": "model", "created": 1704067200, "owned_by": "google"},
-            {"id": "gemini-3.0-flash-thinking", "object": "model", "created": 1704067200, "owned_by": "google"},
-            {"id": "gemini-3.0-pro", "object": "model", "created": 1704067200, "owned_by": "google"},
+            {"id": "gemini-3.1-flash-lite", "object": "model", "created": 1704067200, "owned_by": "google"},
+            {"id": "gemini-3.1-flash-lite-thinking", "object": "model", "created": 1704067200, "owned_by": "google"},
+            {"id": "gemini-3.5-flash", "object": "model", "created": 1704067200, "owned_by": "google"},
+            {"id": "gemini-3.5-flash-thinking", "object": "model", "created": 1704067200, "owned_by": "google"},
+            {"id": "gemini-3.1-pro", "object": "model", "created": 1704067200, "owned_by": "google"},
+            {"id": "gemini-3.1-pro-thinking", "object": "model", "created": 1704067200, "owned_by": "google"},
         ]
     }
 

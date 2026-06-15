@@ -98,6 +98,70 @@
     </header>
 
     <main class="mx-auto max-w-7xl px-6 py-6">
+        <!-- API 快捷接入助手 -->
+        <div class="mb-6 p-4 rounded-xl border border-border/80 bg-white/60 backdrop-blur-md shadow-sm relative overflow-hidden">
+            <div class="absolute -right-10 -top-10 w-40 h-40 bg-gray-100 rounded-full blur-3xl opacity-50 pointer-events-none"></div>
+            <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                    <h2 class="text-sm font-bold flex items-center gap-1.5 text-gray-900">
+                        <svg class="h-4 w-4 text-gray-500" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+                            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+                        </svg>
+                        API 快捷接入助手
+                    </h2>
+                    <p class="text-xs text-muted-foreground mt-1">一键获取配置信息，快速接入 One API / New API 或其他客户端</p>
+                </div>
+                <div class="flex flex-wrap gap-2 text-xs">
+                    <span class="inline-flex items-center gap-1 bg-gray-100 text-gray-800 px-2.5 py-1 rounded-md">
+                        <span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>
+                        已适配最新 6 种 Gemini 3.1/3.5 模型
+                    </span>
+                </div>
+            </div>
+            
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4 pt-4 border-t border-dashed border-border">
+                <!-- 接口地址 -->
+                <div class="space-y-1.5">
+                    <div class="flex items-center justify-between">
+                        <label class="text-xs font-semibold text-gray-500">API Base URL</label>
+                        <button onclick="copyBaseUrl()" class="text-xs text-blue-600 hover:text-blue-800 transition font-medium">复制</button>
+                    </div>
+                    <div class="flex items-center gap-2 bg-gray-50 border border-border rounded-md px-2.5 py-1.5">
+                        <input id="quickBaseUrl" readonly class="bg-transparent border-none outline-none text-xs w-full font-mono text-gray-700" value="">
+                    </div>
+                </div>
+                
+                <!-- 可用模型 -->
+                <div class="space-y-1.5">
+                    <div class="flex items-center justify-between">
+                        <label class="text-xs font-semibold text-gray-500">模型列表</label>
+                        <button onclick="copyModelList()" class="text-xs text-blue-600 hover:text-blue-800 transition font-medium">复制 JSON</button>
+                    </div>
+                    <div class="flex items-center gap-2 bg-gray-50 border border-border rounded-md px-2.5 py-1.5">
+                        <input id="quickModels" readonly class="bg-transparent border-none outline-none text-xs w-full font-mono text-gray-700 truncate" value="gemini-3.1-pro, gemini-3.5-flash...">
+                    </div>
+                </div>
+                
+                <!-- API Key -->
+                <div class="space-y-1.5">
+                    <div class="flex items-center justify-between">
+                        <label class="text-xs font-semibold text-gray-500">API Key (Token)</label>
+                        <button onclick="copyQuickToken()" class="text-xs text-blue-600 hover:text-blue-800 transition font-medium">复制</button>
+                    </div>
+                    <div class="flex items-center gap-2 bg-gray-50 border border-border rounded-md px-2.5 py-1.5">
+                        <input id="quickToken" readonly type="password" class="bg-transparent border-none outline-none text-xs w-full font-mono text-gray-700" value="••••••••••••••••">
+                        <button onclick="toggleQuickTokenVisibility()" class="text-gray-400 hover:text-gray-600">
+                            <svg id="quickTokenEye" class="h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                                <circle cx="12" cy="12" r="3"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Tab 导航 -->
         <div class="border-b border-border mb-6">
             <nav class="flex space-x-8">
@@ -163,10 +227,16 @@
                         <thead>
                             <tr class="border-b border-border">
                                 <th
-                                    class="h-10 px-3 text-left align-middle text-sm font-medium text-muted-foreground w-48">
+                                    class="h-10 px-3 text-left align-middle text-sm font-medium text-muted-foreground w-36">
                                     Cookie ID</th>
                                 <th
-                                    class="h-10 px-3 text-left align-middle text-sm font-medium text-muted-foreground w-20">
+                                    class="h-10 px-3 text-left align-middle text-sm font-medium text-muted-foreground w-44">
+                                    账号邮箱</th>
+                                <th
+                                    class="h-10 px-3 text-left align-middle text-sm font-medium text-muted-foreground w-28">
+                                    订阅级别</th>
+                                <th
+                                    class="h-10 px-3 text-left align-middle text-sm font-medium text-muted-foreground w-24">
                                     状态</th>
                                 <th
                                     class="h-10 px-3 text-left align-middle text-sm font-medium text-muted-foreground w-20">
@@ -178,7 +248,7 @@
                                     class="h-10 px-3 text-left align-middle text-sm font-medium text-muted-foreground w-32">
                                     创建时间</th>
                                 <th
-                                    class="h-10 px-3 text-center align-middle text-sm font-medium text-muted-foreground w-28">
+                                    class="h-10 px-3 text-center align-middle text-sm font-medium text-muted-foreground w-20">
                                     操作</th>
                             </tr>
                         </thead>
@@ -570,6 +640,47 @@
             });
         }
 
+        // 快捷面板复制
+        function copyBaseUrl() {
+            const url = document.getElementById('quickBaseUrl').value;
+            copyToClipboard(url);
+        }
+
+        function copyModelList() {
+            const models = [
+                "gemini-3.1-flash-lite", 
+                "gemini-3.1-flash-lite-thinking", 
+                "gemini-3.5-flash", 
+                "gemini-3.5-flash-thinking", 
+                "gemini-3.1-pro", 
+                "gemini-3.1-pro-thinking"
+            ];
+            copyToClipboard(JSON.stringify(models));
+        }
+
+        function copyQuickToken() {
+            const token = document.getElementById('quickToken').value;
+            copyToClipboard(token);
+        }
+
+        function toggleQuickTokenVisibility() {
+            const tokenInput = document.getElementById('quickToken');
+            const eyeIcon = document.getElementById('quickTokenEye');
+            if (tokenInput.type === 'password') {
+                tokenInput.type = 'text';
+                eyeIcon.innerHTML = `
+                    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
+                    <line x1="1" y1="1" x2="23" y2="23"/>
+                `;
+            } else {
+                tokenInput.type = 'password';
+                eyeIcon.innerHTML = `
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                    <circle cx="12" cy="12" r="3"/>
+                `;
+            }
+        }
+
         // 加载 Cookie 列表
         async function loadCookies() {
             const resp = await api('/api/cookies');
@@ -605,23 +716,38 @@
             }
 
             empty.classList.add('hidden');
-            tbody.innerHTML = filtered.map(c => `
-                <tr class="hover:bg-muted/50">
-                    <td class="p-3 font-mono text-xs">${c.cookie_id.substring(0, 20)}...</td>
-                    <td class="p-3"><span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${c.status === '正常' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}">${c.status}</span></td>
-                    <td class="p-3">${c.use_count}</td>
-                    <td class="p-3 text-muted-foreground text-xs">${c.note || '-'}</td>
-                    <td class="p-3 text-xs text-muted-foreground">${c.created_time ? new Date(c.created_time * 1000).toLocaleString() : '-'}</td>
-                    <td class="p-3 text-center">
-                        <button onclick="deleteCookie('${c.cookie_id}')" class="btn-icon hover:text-destructive" title="删除">
-                            <svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <polyline points="3 6 5 6 21 6"/>
-                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                            </svg>
-                        </button>
-                    </td>
-                </tr>
-            `).join('');
+            tbody.innerHTML = filtered.map(c => {
+                const tierClass = c.tier === 'Advanced 高级版' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-700';
+                
+                let statusClass = 'bg-gray-100 text-gray-700';
+                if (c.status === '正常') {
+                    statusClass = 'bg-green-100 text-green-700';
+                } else if (c.status === '额度超限') {
+                    statusClass = 'bg-yellow-100 text-yellow-700';
+                } else if (c.status === '失效') {
+                    statusClass = 'bg-red-100 text-red-700';
+                }
+
+                return `
+                    <tr class="hover:bg-muted/50">
+                        <td class="p-3 font-mono text-xs">${c.cookie_id.substring(0, 15)}...</td>
+                        <td class="p-3 text-xs font-medium max-w-xs truncate" title="${c.email || '未知账户'}">${c.email || '未知账户'}</td>
+                        <td class="p-3"><span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${tierClass}">${c.tier || '未知'}</span></td>
+                        <td class="p-3"><span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${statusClass}">${c.status}</span></td>
+                        <td class="p-3">${c.use_count}</td>
+                        <td class="p-3 text-muted-foreground text-xs truncate max-w-[150px]" title="${c.note || '-'}">${c.note || '-'}</td>
+                        <td class="p-3 text-xs text-muted-foreground">${c.created_time ? new Date(c.created_time * 1000).toLocaleString() : '-'}</td>
+                        <td class="p-3 text-center">
+                            <button onclick="deleteCookie('${c.cookie_id}')" class="btn-icon hover:text-destructive" title="删除">
+                                <svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <polyline points="3 6 5 6 21 6"/>
+                                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                                </svg>
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
         }
 
         function filterCookies() { renderCookies(); }
@@ -658,6 +784,10 @@
             document.getElementById('cfgTimeout').value = resp.data.timeout || '';
             document.getElementById('pluginToken').value = resp.data.plugin_token || '';
             document.getElementById('imageCacheSize').value = resp.data.current_cache_size || '0 MB';
+
+            // 填充顶部快捷接入面板
+            document.getElementById('quickBaseUrl').value = window.location.origin + '/v1';
+            document.getElementById('quickToken').value = resp.data.api_key || '';
         }
 
         // 重新生成插件 Token
@@ -803,6 +933,7 @@
 
         // 初始化
         loadCookies();
+        loadSettings();
     </script>
 </body>
 
