@@ -965,9 +965,10 @@
 
         // 保存设置
         async function saveSettings() {
+            const newPass = document.getElementById('cfgAdminPass').value.trim();
             const data = {
                 admin_username: document.getElementById('cfgAdminUser').value.trim(),
-                admin_password: document.getElementById('cfgAdminPass').value.trim(),
+                admin_password: newPass,
                 api_key: document.getElementById('cfgApiKey').value.trim(),
                 image_mode: document.getElementById('cfgImageMode').value,
                 base_url: document.getElementById('cfgBaseUrl').value.trim(),
@@ -976,7 +977,19 @@
                 timeout: parseInt(document.getElementById('cfgTimeout').value) || 120
             };
             const resp = await api('/api/settings', { method: 'POST', body: JSON.stringify(data) });
-            if (resp?.success) { showToast('保存成功', 'success'); } else { showToast(resp?.message || '保存失败', 'error'); }
+            if (resp?.success) {
+                if (newPass) {
+                    showToast('密码已修改，请重新登录', 'success');
+                    setTimeout(() => {
+                        localStorage.removeItem('adminToken');
+                        location.href = '/admin';
+                    }, 1500);
+                } else {
+                    showToast('保存成功', 'success');
+                }
+            } else {
+                showToast(resp?.message || '保存失败', 'error');
+            }
         }
 
         // 清除缓存
@@ -987,7 +1000,7 @@
         }
 
         // 退出登录
-        function logout() { localStorage.removeItem('adminToken'); location.href = '/login'; }
+        function logout() { localStorage.removeItem('adminToken'); location.href = '/admin'; }
 
         // 日志处理逻辑
         let allLogs = [];
