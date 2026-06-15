@@ -99,7 +99,7 @@
 
     <main class="mx-auto max-w-7xl px-6 py-6">
         <!-- API 快捷接入助手 -->
-        <div class="mb-6 p-4 rounded-xl border border-border/80 bg-white/60 backdrop-blur-md shadow-sm relative overflow-hidden">
+        <div class="mb-6 p-4 rounded-xl border border-border/80 bg-white/60 backdrop-blur-md shadow-sm relative overflow-visible">
             <div class="absolute -right-10 -top-10 w-40 h-40 bg-gray-100 rounded-full blur-3xl opacity-50 pointer-events-none"></div>
             <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
@@ -197,6 +197,8 @@
             <nav class="flex space-x-8">
                 <button onclick="switchTab('cookies')" id="tabCookies"
                     class="tab-btn border-b-2 border-primary text-sm font-medium py-3 px-1">Cookie 管理</button>
+                <button onclick="switchTab('chat')" id="tabChat"
+                    class="tab-btn border-b-2 border-transparent text-sm font-medium py-3 px-1">对话测试</button>
                 <button onclick="switchTab('logs')" id="tabLogs"
                     class="tab-btn border-b-2 border-transparent text-sm font-medium py-3 px-1">请求日志</button>
                 <button onclick="switchTab('settings')" id="tabSettings"
@@ -239,6 +241,14 @@
                         </select>
                     </div>
                     <div class="flex items-center gap-2">
+                        <button onclick="syncCookies()" id="btnSyncCookies"
+                            class="inline-flex items-center justify-center rounded-md border border-input bg-background hover:bg-accent text-accent-foreground h-8 px-3 transition-colors">
+                            <svg class="h-4 w-4 mr-2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+                                stroke="currentColor" stroke-width="2">
+                                <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
+                            </svg>
+                            <span class="text-sm font-medium" id="txtSyncCookies">同步账户</span>
+                        </button>
                         <button onclick="openAddModal()"
                             class="inline-flex items-center justify-center rounded-md transition-colors focus-visible:outline-none bg-primary text-primary-foreground hover:bg-primary/90 h-8 px-3">
                             <svg class="h-4 w-4 mr-2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
@@ -295,6 +305,68 @@
                         <path d="M9 9h6v6H9z" />
                     </svg>
                     <p class="text-sm text-muted-foreground">暂无数据</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- 对话测试面板 -->
+        <div id="panelChat" class="hidden space-y-6">
+            <div class="rounded-lg border border-border bg-background p-6">
+                <div class="flex items-center justify-between gap-4 mb-4 border-b border-border pb-4">
+                    <div>
+                        <h2 class="text-xl font-bold">对话快速测试</h2>
+                        <p class="text-sm text-muted-foreground mt-1">直接使用当前配置测试网关接口，支持系统提示词及流式输出</p>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <select id="chatModel" class="rounded-md border border-input bg-background px-3 py-1.5 text-sm font-mono">
+                            <option value="gemini-3.5-flash-thinking" selected>gemini-3.5-flash-thinking</option>
+                            <option value="gemini-3.5-flash">gemini-3.5-flash</option>
+                            <option value="gemini-3.1-pro-thinking">gemini-3.1-pro-thinking</option>
+                            <option value="gemini-3.1-pro">gemini-3.1-pro</option>
+                            <option value="gemini-3.1-flash-lite-thinking">gemini-3.1-flash-lite-thinking</option>
+                            <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite</option>
+                        </select>
+                        <button onclick="clearChatHistory()" class="inline-flex items-center justify-center rounded-md text-sm font-medium h-9 px-4 py-2 border border-input bg-background hover:bg-accent">
+                            清空对话
+                          </button>
+                    </div>
+                </div>
+
+                <!-- System Prompt -->
+                <div class="mb-4">
+                    <details class="group border border-border rounded-md bg-muted/20">
+                        <summary class="flex items-center justify-between p-3 text-sm font-medium cursor-pointer hover:bg-muted/40 select-none">
+                            <span>系统提示词 (System Prompt - 可选)</span>
+                            <span class="transition group-open:rotate-180">
+                                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                            </span>
+                        </summary>
+                        <div class="p-3 pt-0 border-t border-border bg-background">
+                            <textarea id="chatSystemPrompt" rows="3" placeholder="例如：你是一个只用诗歌回答问题的 AI 助手..." class="w-full text-sm rounded-md border border-input bg-background p-2.5 focus:outline-none focus:ring-1 focus:ring-ring font-sans"></textarea>
+                        </div>
+                    </details>
+                </div>
+
+                <!-- 聊天窗口 -->
+                <div class="border border-border rounded-lg bg-muted/10 flex flex-col h-[500px]">
+                    <!-- 消息内容 -->
+                    <div id="chatMessageList" class="flex-1 p-4 overflow-y-auto space-y-4 text-sm scroll-smooth">
+                        <!-- 默认占位 -->
+                        <div id="chatPlaceholder" class="flex flex-col items-center justify-center h-full text-muted-foreground/60 space-y-2">
+                            <svg class="h-12 w-12 text-muted-foreground/40" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M12 20.25c4.97 0 9-3.694 9-8.25s-4.03-8.25-9-8.25S3 7.444 3 12c0 2.104.859 4.023 2.273 5.48.432.447.74 1.04.586 1.641a4.483 4.483 0 0 1-.92 1.786c-.082.1-.11.233-.077.35a.396.396 0 0 0 .377.275c1.47 0 2.783-.791 3.51-1.953.18-.287.525-.466.868-.466.45 0 .893.076 1.32.223Z" />
+                            </svg>
+                            <p class="text-sm">在下方输入消息并发送以开始测试</p>
+                        </div>
+                    </div>
+
+                    <!-- 底部输入区 -->
+                    <div class="border-t border-border p-3 bg-background flex items-end gap-3 rounded-b-lg">
+                        <textarea id="chatUserInput" rows="2" placeholder="输入您的问题，Shift+Enter 换行，Enter 发送" class="flex-1 text-sm rounded-md border border-input bg-background p-2.5 focus:outline-none focus:ring-1 focus:ring-ring resize-none font-sans" onkeydown="handleChatInputKey(event)"></textarea>
+                        <button onclick="sendChatMessage()" id="chatSendBtn" class="inline-flex items-center justify-center rounded-md font-medium text-sm transition-colors focus-visible:outline-none bg-primary text-primary-foreground hover:bg-primary/90 h-9 px-4">
+                            发送
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -640,11 +712,14 @@
         // Tab 切换
         function switchTab(tab) {
             document.getElementById('panelCookies').classList.toggle('hidden', tab !== 'cookies');
+            document.getElementById('panelChat').classList.toggle('hidden', tab !== 'chat');
             document.getElementById('panelLogs').classList.toggle('hidden', tab !== 'logs');
             document.getElementById('panelSettings').classList.toggle('hidden', tab !== 'settings');
             
             document.getElementById('tabCookies').classList.toggle('border-primary', tab === 'cookies');
             document.getElementById('tabCookies').classList.toggle('border-transparent', tab !== 'cookies');
+            document.getElementById('tabChat').classList.toggle('border-primary', tab === 'chat');
+            document.getElementById('tabChat').classList.toggle('border-transparent', tab !== 'chat');
             document.getElementById('tabLogs').classList.toggle('border-primary', tab === 'logs');
             document.getElementById('tabLogs').classList.toggle('border-transparent', tab !== 'logs');
             document.getElementById('tabSettings').classList.toggle('border-primary', tab === 'settings');
@@ -767,12 +842,29 @@
                 const tierClass = c.tier === 'Advanced 高级版' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-700';
                 
                 let statusClass = 'bg-gray-100 text-gray-700';
+                let statusText = c.status;
                 if (c.status === '正常') {
                     statusClass = 'bg-green-100 text-green-700';
                 } else if (c.status === '额度超限') {
                     statusClass = 'bg-yellow-100 text-yellow-700';
                 } else if (c.status === '失效') {
                     statusClass = 'bg-red-100 text-red-700';
+                    if (c.last_check_time) {
+                        const mins = Math.floor((Date.now() / 1000 - c.last_check_time) / 60);
+                        if (mins < 1) {
+                            statusText += ' (刚刚)';
+                        } else if (mins < 60) {
+                            statusText += ` (${mins}分钟前)`;
+                        } else {
+                            const hrs = Math.floor(mins / 60);
+                            if (hrs < 24) {
+                                statusText += ` (${hrs}小时前)`;
+                            } else {
+                                const days = Math.floor(hrs / 24);
+                                statusText += ` (${days}天前)`;
+                            }
+                        }
+                    }
                 }
 
                 return `
@@ -780,7 +872,7 @@
                         <td class="p-3 font-mono text-xs">${c.cookie_id.substring(0, 15)}...</td>
                         <td class="p-3 text-xs font-medium max-w-xs truncate" title="${c.email || '未知账户'}">${c.email || '未知账户'}</td>
                         <td class="p-3"><span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${tierClass}">${c.tier || '未知'}</span></td>
-                        <td class="p-3"><span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${statusClass}">${c.status}</span></td>
+                        <td class="p-3"><span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${statusClass}">${statusText}</span></td>
                         <td class="p-3">${c.use_count}</td>
                         <td class="p-3 text-muted-foreground text-xs truncate max-w-[150px]" title="${c.note || '-'}">${c.note || '-'}</td>
                         <td class="p-3 text-xs text-muted-foreground">${c.created_time ? new Date(c.created_time * 1000).toLocaleString() : '-'}</td>
@@ -816,6 +908,28 @@
             if (!confirm('确定删除此 Cookie?')) return;
             const resp = await api(`/api/cookies/${id}`, { method: 'DELETE' });
             if (resp?.success) { showToast('删除成功', 'success'); loadCookies(); } else { showToast(resp?.message || '删除失败', 'error'); }
+        }
+
+        async function syncCookies() {
+            const btn = document.getElementById('btnSyncCookies');
+            const txt = document.getElementById('txtSyncCookies');
+            btn.disabled = true;
+            txt.textContent = '同步中...';
+            
+            try {
+                const resp = await api('/api/cookies/sync', { method: 'POST' });
+                if (resp?.success) {
+                    showToast(resp.message || '同步完成', 'success');
+                    loadCookies();
+                } else {
+                    showToast(resp?.message || '同步失败', 'error');
+                }
+            } catch (err) {
+                showToast('同步异常: ' + err.message, 'error');
+            } finally {
+                btn.disabled = false;
+                txt.textContent = '同步账户';
+            }
         }
 
         // 加载设置
@@ -975,6 +1089,147 @@
                 loadLogs();
             } else {
                 showToast(resp?.message || '清空日志失败', 'error');
+            }
+        }
+
+        // =============================================================================
+        // 对话测试功能
+        // =============================================================================
+        let chatHistory = [];
+
+        function clearChatHistory() {
+            chatHistory = [];
+            document.getElementById('chatMessageList').innerHTML = `
+                <div id="chatPlaceholder" class="flex flex-col items-center justify-center h-full text-muted-foreground/60 space-y-2">
+                    <svg class="h-12 w-12 text-muted-foreground/40" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 20.25c4.97 0 9-3.694 9-8.25s-4.03-8.25-9-8.25S3 7.444 3 12c0 2.104.859 4.023 2.273 5.48.432.447.74 1.04.586 1.641a4.483 4.483 0 0 1-.92 1.786c-.082.1-.11.233-.077.35a.396.396 0 0 0 .377.275c1.47 0 2.783-.791 3.51-1.953.18-.287.525-.466.868-.466.45 0 .893.076 1.32.223Z" />
+                    </svg>
+                    <p class="text-sm">在下方输入消息并发送以开始测试</p>
+                </div>
+            `;
+        }
+
+        function handleChatInputKey(event) {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                sendChatMessage();
+            }
+        }
+
+        function appendChatMessage(role, text) {
+            const list = document.getElementById('chatMessageList');
+            const placeholder = document.getElementById('chatPlaceholder');
+            if (placeholder) placeholder.remove();
+
+            const isUser = role === 'user';
+            const msgDiv = document.createElement('div');
+            msgDiv.className = `flex ${isUser ? 'justify-end' : 'justify-start'} w-full animate-slide-up`;
+            
+            const bubble = document.createElement('div');
+            bubble.className = `max-w-[80%] rounded-lg px-3 py-2 text-sm leading-relaxed ${
+                isUser 
+                ? 'bg-primary text-primary-foreground rounded-tr-none' 
+                : 'bg-muted text-foreground rounded-tl-none border border-border/50'
+            }`;
+            
+            bubble.style.whiteSpace = 'pre-wrap';
+            bubble.textContent = text;
+            
+            msgDiv.appendChild(bubble);
+            list.appendChild(msgDiv);
+            list.scrollTop = list.scrollHeight;
+            
+            return bubble;
+        }
+
+        async function sendChatMessage() {
+            const input = document.getElementById('chatUserInput');
+            const text = input.value.trim();
+            if (!text) return;
+            
+            const model = document.getElementById('chatModel').value;
+            const systemPrompt = document.getElementById('chatSystemPrompt').value.trim();
+            
+            input.value = '';
+            appendChatMessage('user', text);
+            
+            const messages = [];
+            if (systemPrompt) {
+                messages.push({ role: 'system', content: systemPrompt });
+            }
+            chatHistory.forEach(msg => messages.push(msg));
+            messages.push({ role: 'user', content: text });
+            
+            const assistantBubble = appendChatMessage('assistant', '正在思考中...');
+            const sendBtn = document.getElementById('chatSendBtn');
+            sendBtn.disabled = true;
+            sendBtn.textContent = '生成中';
+
+            const apiKey = document.getElementById('cfgApiKey').value || 'sk-123456';
+            
+            try {
+                const response = await fetch('/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${apiKey}`
+                    },
+                    body: JSON.stringify({
+                        model: model,
+                        messages: messages,
+                        stream: true
+                    })
+                });
+
+                if (!response.ok) {
+                    const err = await response.text();
+                    assistantBubble.textContent = `请求出错: ${response.status} - ${err}`;
+                    assistantBubble.classList.add('text-red-500');
+                    return;
+                }
+
+                assistantBubble.textContent = '';
+                
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder('utf-8');
+                let buffer = '';
+                let fullContent = '';
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop();
+
+                    for (const line of lines) {
+                        const cleanLine = line.trim();
+                        if (!cleanLine) continue;
+                        if (cleanLine.startsWith('data: [DONE]')) continue;
+                        if (cleanLine.startsWith('data: ')) {
+                            try {
+                                const parsed = JSON.parse(cleanLine.substring(6));
+                                const delta = parsed.choices[0].delta.content;
+                                if (delta) {
+                                    fullContent += delta;
+                                    assistantBubble.textContent = fullContent;
+                                    document.getElementById('chatMessageList').scrollTop = document.getElementById('chatMessageList').scrollHeight;
+                                }
+                            } catch (e) {}
+                        }
+                    }
+                }
+                
+                chatHistory.push({ role: 'user', content: text });
+                chatHistory.push({ role: 'assistant', content: fullContent });
+
+            } catch (err) {
+                assistantBubble.textContent = `连接失败: ${err.message}`;
+                assistantBubble.classList.add('text-red-500');
+            } finally {
+                sendBtn.disabled = false;
+                sendBtn.textContent = '发送';
             }
         }
 

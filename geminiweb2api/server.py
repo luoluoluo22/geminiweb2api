@@ -859,14 +859,47 @@ def api_list_cookies(_: str = Depends(verify_admin_token)):
     cookies = get_cookies()
     data = []
     for cookie_id, cookie_data in cookies.items():
+        normalize_cookie_record(cookie_id, cookie_data)
         data.append({
             "cookie_id": cookie_id,
             "status": cookie_data.get("status", "正常"),
             "use_count": cookie_data.get("use_count", 0),
             "note": cookie_data.get("note", ""),
-            "created_time": cookie_data.get("created_time", 0)
+            "created_time": cookie_data.get("created_time", 0),
+            "email": cookie_data.get("email", "未知账户"),
+            "tier": cookie_data.get("tier", "未知"),
+            "last_check_time": cookie_data.get("last_check_time", 0)
         })
     return {"success": True, "data": data}
+
+@app.post("/api/cookies/sync")
+async def api_sync_cookies(_: str = Depends(verify_admin_token)):
+    cookies = get_cookies()
+    settings = get_settings()
+    proxy = settings.get("proxy_url", "") or None
+    timeout = get_request_timeout()
+
+    targets = []
+    for cookie_id, cookie_data in cookies.items():
+        normalize_cookie_record(cookie_id, cookie_data)
+        if cookie_data.get("status") != "失效" and cookie_data.get("email", "未知账户") == "未知账户":
+            targets.append((cookie_id, cookie_data))
+
+    if not targets:
+        return {"success": True, "message": "所有账户信息已是最新，无需同步"}
+
+    async def sync_one(cid, cdata):
+        try:
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                None,
+                lambda: refresh_cookie_state(cid, cdata, proxy, timeout, force=True)
+            )
+        except Exception as e:
+            print(f"Failed to sync cookie {cid[:8]} inside async task: {e}")
+
+    await asyncio.gather(*(sync_one(cid, cdata) for cid, cdata in targets))
+    return {"success": True, "message": f"成功同步了 {len(targets)} 个账户的信息"}
 
 @app.post("/api/cookies/add")
 def api_add_cookie(req: AddCookieRequest, _: str = Depends(verify_admin_token)):
