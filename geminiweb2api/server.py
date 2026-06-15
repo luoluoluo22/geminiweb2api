@@ -367,19 +367,37 @@ def get_effective_image_mode(settings: Dict[str, Any]) -> str:
 # =============================================================================
 
 # Simple token store (in production, use proper sessions/JWT)
-admin_tokens: Dict[str, float] = {}  # token -> expiry timestamp
+import hmac
+import hashlib
 
-def generate_token():
-    return secrets.token_hex(32)
+def generate_signed_token() -> str:
+    expires_at = int(time.time()) + 3600
+    secret = get_settings().get("admin_password", "admin")
+    msg = f"{expires_at}:{secret}"
+    signature = hashlib.md5(msg.encode()).hexdigest()
+    return f"{expires_at}.{signature}"
+
+def verify_signed_token(token: str) -> bool:
+    try:
+        if "." not in token:
+            return False
+        expires_at_str, signature = token.split(".", 1)
+        expires_at = int(expires_at_str)
+        if expires_at < time.time():
+            return False
+        secret = get_settings().get("admin_password", "admin")
+        msg = f"{expires_at}:{secret}"
+        expected_sig = hashlib.md5(msg.encode()).hexdigest()
+        return hmac.compare_digest(expected_sig, signature)
+    except Exception:
+        return False
 
 def verify_admin_token(creds: HTTPAuthorizationCredentials = Depends(security)):
     if not creds:
         raise HTTPException(status_code=401, detail="Not authenticated")
     token = creds.credentials
-    if token not in admin_tokens or admin_tokens[token] < time.time():
+    if not verify_signed_token(token):
         raise HTTPException(status_code=401, detail="Invalid or expired token")
-    # Extend token validity
-    admin_tokens[token] = time.time() + 3600
     return token
 
 def verify_api_key(creds: HTTPAuthorizationCredentials = Depends(security)):
@@ -849,8 +867,7 @@ def api_login(req: LoginRequest):
     expected_pass = settings.get("admin_password", "admin")
     
     if req.username == expected_user and req.password == expected_pass:
-        token = generate_token()
-        admin_tokens[token] = time.time() + 3600  # 1 hour
+        token = generate_signed_token()
         return {"success": True, "token": token}
     return {"success": False, "message": "用户名或密码错误"}
 
