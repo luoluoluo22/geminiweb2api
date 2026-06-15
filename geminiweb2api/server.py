@@ -183,6 +183,64 @@ def save_data(data: Dict):
     data_cache["value"] = clone_data(data)
     data_cache["expires_at"] = time.time() + DATA_CACHE_TTL_SECONDS
 
+def write_request_log(
+    path: str,
+    method: str,
+    model: str,
+    duration: float,
+    status_code: int,
+    status: str,
+    request_body: Any,
+    response_body: Any,
+    error_message: str = "",
+    cookie_id: Optional[str] = None
+):
+    """记录请求日志，限制最大长度为100"""
+    try:
+        data = load_data(force_refresh=True)
+        if "logs" not in data:
+            data["logs"] = []
+            
+        import datetime
+        now = datetime.datetime.now().astimezone()
+        
+        # 截断超大Body，避免数据过大影响存储
+        def sanitize_body(body: Any) -> Any:
+            if isinstance(body, str):
+                return body[:2000] + "..." if len(body) > 2000 else body
+            elif isinstance(body, dict):
+                # 简单克隆并截断部分深层内容
+                new_body = {}
+                for k, v in body.items():
+                    if isinstance(v, str) and len(v) > 2000:
+                        new_body[k] = v[:2000] + "..."
+                    else:
+                        new_body[k] = v
+                return new_body
+            return body
+
+        log_entry = {
+            "id": str(uuid.uuid4()),
+            "timestamp": now.isoformat(),
+            "path": path,
+            "method": method,
+            "model": model,
+            "duration": round(duration, 3),
+            "status_code": status_code,
+            "status": status,
+            "request_body": sanitize_body(request_body),
+            "response_body": sanitize_body(response_body),
+            "error_message": error_message[:2000] if error_message else "",
+            "cookie_id": cookie_id
+        }
+        
+        data["logs"].insert(0, log_entry)
+        data["logs"] = data["logs"][:100]
+        
+        save_data(data)
+    except Exception as e:
+        print(f"Failed to write request log: {e}")
+
 def get_settings() -> Dict:
     return load_data().get("settings", {})
 
@@ -433,6 +491,8 @@ def finalize_loaded_data(data: Dict[str, Any], default: Dict[str, Any]) -> Dict[
         data["cookies"] = {}
     if "files" not in data:
         data["files"] = {}
+    if "logs" not in data:
+        data["logs"] = []
     if "settings" not in data:
         data["settings"] = default["settings"]
 
@@ -844,6 +904,19 @@ def api_stats(_: str = Depends(verify_admin_token)):
     unused = sum(1 for c in cookies.values() if c.get("use_count", 0) == 0)
     return {"success": True, "total": total, "active": active, "failed": failed, "unused": unused}
 
+@app.get("/api/logs")
+def api_get_logs(_: str = Depends(verify_admin_token)):
+    data = load_data()
+    logs = data.get("logs", [])
+    return {"success": True, "data": logs}
+
+@app.post("/api/logs/clear")
+def api_clear_logs(_: str = Depends(verify_admin_token)):
+    data = load_data(force_refresh=True)
+    data["logs"] = []
+    save_data(data)
+    return {"success": True, "message": "请求日志已成功清空"}
+
 def get_cache_size() -> str:
     """Calculate current image cache size"""
     total = 0
@@ -1058,7 +1131,8 @@ def run_gemini_request(
     request: Request,
     image_mode: str,
     proxy: Optional[str],
-    timeout: int
+    timeout: int,
+    cookie_info: Optional[Dict[str, Any]] = None
 ) -> tuple[str, List[str]]:
     max_retries = 3
     last_error = None
@@ -1072,6 +1146,8 @@ def run_gemini_request(
 
         cookie_id, cookie_data = candidates[0]
         tried_cookie_ids.add(cookie_id)
+        if cookie_info is not None:
+            cookie_info["cookie_id"] = cookie_id
 
         try:
             refresh_ok, refresh_reason = refresh_cookie_state(
@@ -1227,30 +1303,57 @@ async def image_generations(req: ImageGenerationRequest, request: Request):
     image_mode = "base64" if req.response_format == "b64_json" else get_effective_image_mode(settings)
     timeout = get_request_timeout()
 
-    _, image_urls = run_gemini_request(
-        model=req.model,
-        prompt=req.prompt,
-        input_files=[],
-        request=request,
-        image_mode=image_mode,
-        proxy=proxy,
-        timeout=timeout
-    )
+    start_time = time.time()
+    cookie_info = {"cookie_id": None}
+    status = "success"
+    status_code = 200
+    image_urls = []
+    error_message = ""
+    try:
+        _, image_urls = run_gemini_request(
+            model=req.model,
+            prompt=req.prompt,
+            input_files=[],
+            request=request,
+            image_mode=image_mode,
+            proxy=proxy,
+            timeout=timeout,
+            cookie_info=cookie_info
+        )
 
-    if not image_urls:
-        raise HTTPException(status_code=500, detail="Image generation returned no images")
+        if not image_urls:
+            raise HTTPException(status_code=500, detail="Image generation returned no images")
 
-    data = []
-    for image_url in image_urls:
-        if image_url.startswith("data:image/"):
-            _, b64 = image_url.split(",", 1)
-            data.append({"b64_json": b64})
-        elif req.response_format == "b64_json":
-            raise HTTPException(status_code=500, detail="Image could not be converted to base64")
-        else:
-            data.append({"url": image_url})
+        data = []
+        for image_url in image_urls:
+            if image_url.startswith("data:image/"):
+                _, b64 = image_url.split(",", 1)
+                data.append({"b64_json": b64})
+            elif req.response_format == "b64_json":
+                raise HTTPException(status_code=500, detail="Image could not be converted to base64")
+            else:
+                data.append({"url": image_url})
 
-    return {"created": int(time.time()), "data": data}
+        return {"created": int(time.time()), "data": data}
+    except Exception as e:
+        status = "error"
+        status_code = getattr(e, "status_code", 500)
+        error_message = str(e)
+        raise e
+    finally:
+        duration = time.time() - start_time
+        write_request_log(
+            path="/v1/images/generations",
+            method="POST",
+            model=req.model,
+            duration=duration,
+            status_code=status_code,
+            status=status,
+            request_body=req.dict(),
+            response_body={"data": [{"url": url} for url in image_urls]} if status == "success" else None,
+            error_message=error_message,
+            cookie_id=cookie_info.get("cookie_id")
+        )
 
 def save_image_locally(url: str, cookies: Dict[str, str]) -> Optional[str]:
     """Downloads image and returns local filename"""
@@ -1366,8 +1469,20 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
             # Send an early SSE event so browsers/clients don't time out during image generation.
             yield ": keep-alive\n\n"
 
+            start_time = time.time()
+            cookie_info = {"cookie_id": None}
+            status = "success"
+            status_code = 200
+            content = ""
+            error_message = ""
+
             try:
-                content, _ = run_gemini_request(req.model, prompt, input_files, request, image_mode, proxy, timeout)
+                content, _ = run_gemini_request(req.model, prompt, input_files, request, image_mode, proxy, timeout, cookie_info=cookie_info)
+            except Exception as e:
+                status = "error"
+                status_code = getattr(e, "status_code", 500)
+                error_message = str(e)
+                raise e
             finally:
                 for f in temp_files:
                     try:
@@ -1375,6 +1490,22 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
                             os.remove(f)
                     except Exception:
                         pass
+                
+                # 记录流式返回的最终日志
+                duration = time.time() - start_time
+                write_request_log(
+                    path="/v1/chat/completions",
+                    method="POST",
+                    model=req.model,
+                    duration=duration,
+                    status_code=status_code,
+                    status=status,
+                    request_body=req.dict(),
+                    response_body={"choices": [{"message": {"role": "assistant", "content": content}}]} if status == "success" else None,
+                    error_message=error_message,
+                    cookie_id=cookie_info.get("cookie_id")
+                )
+
             chunk_data = {
                 "id": chunk_id,
                 "object": "chat.completion.chunk",
@@ -1408,8 +1539,14 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
 
         return StreamingResponse(generate_stream(), media_type="text/event-stream")
 
+    start_time = time.time()
+    cookie_info = {"cookie_id": None}
+    status = "success"
+    status_code = 200
+    content = ""
+    error_message = ""
     try:
-        content, _ = run_gemini_request(req.model, prompt, input_files, request, image_mode, proxy, timeout)
+        content, _ = run_gemini_request(req.model, prompt, input_files, request, image_mode, proxy, timeout, cookie_info=cookie_info)
         return ChatCompletionResponse(
             id=f"chatcmpl-{uuid.uuid4()}",
             created=int(time.time()),
@@ -1423,6 +1560,11 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
             ],
             usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
         )
+    except Exception as e:
+        status = "error"
+        status_code = getattr(e, "status_code", 500)
+        error_message = str(e)
+        raise e
     finally:
         for f in temp_files:
             try:
@@ -1430,6 +1572,21 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
                     os.remove(f)
             except Exception:
                 pass
+        
+        # 记录非流式返回的日志
+        duration = time.time() - start_time
+        write_request_log(
+            path="/v1/chat/completions",
+            method="POST",
+            model=req.model,
+            duration=duration,
+            status_code=status_code,
+            status=status,
+            request_body=req.dict(),
+            response_body={"choices": [{"message": {"role": "assistant", "content": content}}]} if status == "success" else None,
+            error_message=error_message,
+            cookie_id=cookie_info.get("cookie_id")
+        )
 
 @app.get("/v1/models")
 def list_models():

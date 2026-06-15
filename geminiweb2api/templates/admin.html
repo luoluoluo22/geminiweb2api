@@ -103,6 +103,8 @@
             <nav class="flex space-x-8">
                 <button onclick="switchTab('cookies')" id="tabCookies"
                     class="tab-btn border-b-2 border-primary text-sm font-medium py-3 px-1">Cookie 管理</button>
+                <button onclick="switchTab('logs')" id="tabLogs"
+                    class="tab-btn border-b-2 border-transparent text-sm font-medium py-3 px-1">请求日志</button>
                 <button onclick="switchTab('settings')" id="tabSettings"
                     class="tab-btn border-b-2 border-transparent text-sm font-medium py-3 px-1">Setting 配置</button>
             </nav>
@@ -193,6 +195,59 @@
                         <path d="M9 9h6v6H9z" />
                     </svg>
                     <p class="text-sm text-muted-foreground">暂无数据</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- 请求日志面板 -->
+        <div id="panelLogs" class="hidden space-y-6">
+            <div class="rounded-lg border border-border bg-background p-6">
+                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+                    <div>
+                        <h2 class="text-xl font-bold">API 请求日志</h2>
+                        <p class="text-sm text-muted-foreground mt-1">仅在服务器端保存最近的 100 条请求和响应记录，便于问题排查</p>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <select id="logStatusFilter" onchange="filterLogs()" class="rounded-md border border-input bg-background px-3 py-1.5 text-sm">
+                            <option value="all">所有状态</option>
+                            <option value="200">仅成功 (200)</option>
+                            <option value="error">仅报错</option>
+                        </select>
+                        <button onclick="loadLogs()" class="inline-flex items-center justify-center rounded-md text-sm font-medium h-9 px-4 py-2 border border-input bg-background hover:bg-accent">
+                            刷新
+                        </button>
+                        <button onclick="clearLogs()" class="inline-flex items-center justify-center rounded-md text-sm font-medium h-9 px-4 py-2 bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                            清空日志
+                        </button>
+                    </div>
+                </div>
+
+                <div class="overflow-x-auto rounded-md border border-border">
+                    <table class="w-full text-sm table-fixed">
+                        <thead>
+                            <tr class="bg-muted/50 border-b border-border text-muted-foreground font-medium text-left">
+                                <th class="py-3 px-4 w-1/5">请求时间</th>
+                                <th class="py-3 px-4 w-1/6">接口路径</th>
+                                <th class="py-3 px-4 w-1/6">使用模型</th>
+                                <th class="py-3 px-4 w-1/6">Cookie ID</th>
+                                <th class="py-3 px-4 w-1/12">状态</th>
+                                <th class="py-3 px-4 w-1/12">耗时</th>
+                                <th class="py-3 px-4 w-1/12 text-right">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="logsTableBody" class="divide-y divide-border">
+                            <!-- 动态加载 -->
+                        </tbody>
+                    </table>
+                </div>
+
+                <div id="logsEmptyState" class="hidden flex flex-col items-center justify-center py-12">
+                    <svg class="h-10 w-10 text-muted-foreground/50 mb-3" xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="3" width="18" height="18" rx="2" />
+                        <path d="M9 9h6v6H9z" />
+                    </svg>
+                    <p class="text-sm text-muted-foreground">暂无日志数据</p>
                 </div>
             </div>
         </div>
@@ -360,6 +415,66 @@
         </div>
     </main>
 
+    <!-- 日志详情模态框 -->
+    <div id="logDetailModal" class="hidden fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+        <div class="bg-background rounded-lg border border-border w-full max-w-4xl max-h-[90vh] flex flex-col shadow-xl">
+            <div class="flex items-center justify-between p-5 border-b border-border">
+                <h3 class="text-lg font-semibold">请求日志详情</h3>
+                <button onclick="closeLogDetailModal()" class="text-muted-foreground hover:text-foreground transition-colors">
+                    <svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18" />
+                        <line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
+                </button>
+            </div>
+            <div class="p-6 space-y-4 overflow-y-auto flex-1">
+                <div class="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                        <span class="font-medium text-muted-foreground">请求时间:</span>
+                        <span id="detailTime" class="ml-2 font-mono text-xs"></span>
+                    </div>
+                    <div>
+                        <span class="font-medium text-muted-foreground">请求方法/路径:</span>
+                        <span id="detailPath" class="ml-2 font-mono font-bold text-xs"></span>
+                    </div>
+                    <div>
+                        <span class="font-medium text-muted-foreground">状态码:</span>
+                        <span id="detailStatus" class="ml-2 font-mono font-bold text-xs"></span>
+                    </div>
+                    <div>
+                        <span class="font-medium text-muted-foreground">请求耗时:</span>
+                        <span id="detailDuration" class="ml-2 font-mono text-xs"></span>
+                    </div>
+                    <div>
+                        <span class="font-medium text-muted-foreground">使用模型:</span>
+                        <span id="detailModel" class="ml-2 font-mono text-xs"></span>
+                    </div>
+                    <div>
+                        <span class="font-medium text-muted-foreground">Cookie ID:</span>
+                        <span id="detailCookieId" class="ml-2 font-mono text-xs bg-muted px-1.5 py-0.5 rounded"></span>
+                    </div>
+                </div>
+                
+                <hr class="border-border">
+                
+                <div class="space-y-2">
+                    <label class="text-sm font-medium text-muted-foreground">Request Body</label>
+                    <pre id="detailReqBody" class="bg-muted p-4 rounded-lg text-xs font-mono overflow-x-auto max-h-[200px]"></pre>
+                </div>
+                
+                <div class="space-y-2">
+                    <label class="text-sm font-medium text-muted-foreground">Response Body / Error</label>
+                    <pre id="detailRespBody" class="bg-muted p-4 rounded-lg text-xs font-mono overflow-x-auto max-h-[300px] whitespace-pre-wrap"></pre>
+                </div>
+            </div>
+            <div class="flex items-center justify-end gap-3 p-5 border-t border-border bg-muted/30">
+                <button onclick="closeLogDetailModal()"
+                    class="inline-flex items-center justify-center rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 h-9 px-5">关闭</button>
+            </div>
+        </div>
+    </div>
+
     <!-- 添加 Cookie 模态框 -->
     <div id="addModal" class="hidden fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
         <div
@@ -425,11 +540,19 @@
         // Tab 切换
         function switchTab(tab) {
             document.getElementById('panelCookies').classList.toggle('hidden', tab !== 'cookies');
+            document.getElementById('panelLogs').classList.toggle('hidden', tab !== 'logs');
             document.getElementById('panelSettings').classList.toggle('hidden', tab !== 'settings');
+            
             document.getElementById('tabCookies').classList.toggle('border-primary', tab === 'cookies');
             document.getElementById('tabCookies').classList.toggle('border-transparent', tab !== 'cookies');
+            document.getElementById('tabLogs').classList.toggle('border-primary', tab === 'logs');
+            document.getElementById('tabLogs').classList.toggle('border-transparent', tab !== 'logs');
             document.getElementById('tabSettings').classList.toggle('border-primary', tab === 'settings');
             document.getElementById('tabSettings').classList.toggle('border-transparent', tab !== 'settings');
+            
+            if (tab === 'logs') {
+                loadLogs();
+            }
             if (tab === 'settings') {
                 loadSettings();
                 // Set plugin server URL
@@ -574,6 +697,109 @@
 
         // 退出登录
         function logout() { localStorage.removeItem('adminToken'); location.href = '/login'; }
+
+        // 日志处理逻辑
+        let allLogs = [];
+        async function loadLogs() {
+            const tableBody = document.getElementById('logsTableBody');
+            tableBody.innerHTML = '<tr><td colspan="7" class="py-6 text-center text-muted-foreground animate-pulse">正在加载日志...</td></tr>';
+            document.getElementById('logsEmptyState').classList.add('hidden');
+            
+            const resp = await api('/api/logs');
+            if (resp?.success) {
+                allLogs = resp.data || [];
+                filterLogs();
+            } else {
+                tableBody.innerHTML = '<tr><td colspan="7" class="py-6 text-center text-red-500 font-medium">加载日志失败，请检查网络或认证</td></tr>';
+            }
+        }
+
+        function filterLogs() {
+            const statusFilter = document.getElementById('logStatusFilter').value;
+            let filtered = allLogs;
+            if (statusFilter === '200') {
+                filtered = allLogs.filter(log => log.status_code === 200);
+            } else if (statusFilter === 'error') {
+                filtered = allLogs.filter(log => log.status_code !== 200);
+            }
+            renderLogs(filtered);
+        }
+
+        function renderLogs(logs) {
+            const tableBody = document.getElementById('logsTableBody');
+            const emptyState = document.getElementById('logsEmptyState');
+            
+            if (logs.length === 0) {
+                tableBody.innerHTML = '';
+                emptyState.classList.remove('hidden');
+                return;
+            }
+            emptyState.classList.add('hidden');
+            
+            tableBody.innerHTML = logs.map(log => {
+                const date = new Date(log.timestamp);
+                const timeStr = date.toLocaleString();
+                const isSuccess = log.status === 'success';
+                const statusBadge = isSuccess
+                    ? '<span class="inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-xs font-semibold text-green-700 bg-green-50"><span class="h-1.5 w-1.5 rounded-full bg-green-600"></span>' + log.status_code + '</span>'
+                    : '<span class="inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-xs font-semibold text-red-700 bg-red-50"><span class="h-1.5 w-1.5 rounded-full bg-red-600"></span>' + (log.status_code || 'Err') + '</span>';
+                
+                const cookieDisp = log.cookie_id ? log.cookie_id.substring(0, 8) + '...' : '-';
+                
+                return `
+                    <tr class="hover:bg-muted/30 transition-colors">
+                        <td class="py-3 px-4 font-mono text-xs text-muted-foreground truncate" title="${timeStr}">${timeStr}</td>
+                        <td class="py-3 px-4 font-semibold text-xs truncate" title="${log.path}">${log.path}</td>
+                        <td class="py-3 px-4 text-xs font-mono truncate" title="${log.model}">${log.model || '-'}</td>
+                        <td class="py-3 px-4 text-xs font-mono truncate" title="${log.cookie_id || ''}">${cookieDisp}</td>
+                        <td class="py-3 px-4">${statusBadge}</td>
+                        <td class="py-3 px-4 font-mono text-xs">${log.duration ? log.duration + 's' : '-'}</td>
+                        <td class="py-3 px-4 text-right">
+                            <button onclick="showLogDetail('${log.id}')" class="inline-flex items-center justify-center text-xs text-primary underline underline-offset-4 hover:text-primary/80">查看详情</button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function showLogDetail(logId) {
+            const log = allLogs.find(l => l.id === logId);
+            if (!log) return;
+            
+            const date = new Date(log.timestamp);
+            document.getElementById('detailTime').textContent = date.toLocaleString();
+            document.getElementById('detailPath').textContent = `${log.method} ${log.path}`;
+            document.getElementById('detailStatus').textContent = log.status_code || '未知';
+            document.getElementById('detailStatus').className = `ml-2 font-mono font-bold ${log.status_code === 200 ? 'text-green-600' : 'text-red-600'}`;
+            document.getElementById('detailDuration').textContent = log.duration ? `${log.duration} 秒` : '-';
+            document.getElementById('detailModel').textContent = log.model || '-';
+            document.getElementById('detailCookieId').textContent = log.cookie_id || '未使用';
+            
+            document.getElementById('detailReqBody').textContent = JSON.stringify(log.request_body, null, 2);
+            
+            if (log.status === 'success') {
+                document.getElementById('detailRespBody').textContent = JSON.stringify(log.response_body, null, 2);
+            } else {
+                document.getElementById('detailRespBody').textContent = log.error_message || '未知错误';
+            }
+            
+            document.getElementById('logDetailModal').classList.remove('hidden');
+        }
+
+        function closeLogDetailModal() {
+            document.getElementById('logDetailModal').classList.add('hidden');
+        }
+
+        async function clearLogs() {
+            if (!confirm('确定清空所有请求日志吗？此操作无法撤销。')) return;
+            const resp = await api('/api/logs/clear', { method: 'POST' });
+            if (resp?.success) {
+                showToast('日志已清空', 'success');
+                loadLogs();
+            } else {
+                showToast(resp?.message || '清空日志失败', 'error');
+            }
+        }
 
         // 初始化
         loadCookies();
