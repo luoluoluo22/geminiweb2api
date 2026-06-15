@@ -1292,8 +1292,11 @@ def run_gemini_request(
                     last_error=f"Usage limit exceeded: {str(e)[:200]}",
                     last_check_time=int(time.time())
                 )
-            
-            is_retryable = any(keyword in error_msg for keyword in [
+            # 任何网络错误、超时、连接被重置，或者含有授权/过期相关的特定错误，均触发重试
+            is_network_error = isinstance(e, requests.RequestException) or any(
+                kw in error_msg for kw in ["timeout", "connection", "proxy", "eof", "reset", "handshake"]
+            )
+            is_retryable = is_network_error or any(keyword in error_msg for keyword in [
                 "503", "401", "unauthorized", "auth", "cookie", "token", "psid", "expired"
             ])
 
