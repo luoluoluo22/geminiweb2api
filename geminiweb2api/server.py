@@ -23,6 +23,12 @@ from .client import GeminiClient
 from .conversation import ChatSession
 from .auth import rotate_1psidts
 
+def get_beijing_time_str(fmt: str = "%Y-%m-%d %H:%M:%S") -> str:
+    from datetime import datetime, timedelta
+    # Vercel 默认是 UTC，加上 8 小时即为北京时间
+    beijing_time = datetime.utcnow() + timedelta(hours=8)
+    return beijing_time.strftime(fmt)
+
 app = FastAPI(title="GeminiWeb2API", version="0.2.0")
 
 from fastapi.middleware.cors import CORSMiddleware
@@ -885,7 +891,8 @@ def api_list_cookies(_: str = Depends(verify_admin_token)):
             "created_time": cookie_data.get("created_time", 0),
             "email": cookie_data.get("email", "未知账户"),
             "tier": cookie_data.get("tier", "未知"),
-            "last_check_time": cookie_data.get("last_check_time", 0)
+            "last_check_time": cookie_data.get("last_check_time", 0),
+            "last_refresh_time": cookie_data.get("last_refresh_time", 0)
         })
     return {"success": True, "data": data}
 
@@ -1116,7 +1123,7 @@ def api_plugin_update_cookie(req: PluginCookieUpdate, _: str = Depends(verify_pl
         data["cookies"][existing_id]["last_error"] = ""
         data["cookies"][existing_id]["last_refresh_time"] = int(time.time())
         data["cookies"][existing_id]["last_check_time"] = int(time.time())
-        data["cookies"][existing_id]["note"] = f"插件更新 {time.strftime('%Y-%m-%d %H:%M')}"
+        data["cookies"][existing_id]["note"] = f"插件更新 {get_beijing_time_str('%Y-%m-%d %H:%M')}"
         save_data(data)
         return {"success": True, "message": "Cookie 已更新", "action": "updated", "cookie_id": existing_id}
     else:
@@ -1127,8 +1134,8 @@ def api_plugin_update_cookie(req: PluginCookieUpdate, _: str = Depends(verify_pl
             "psidts": psidts,
             "parsed": parsed,
             "status": "正常",
-            "note": f"插件添加 {time.strftime('%Y-%m-%d %H:%M')}",
-            "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "note": f"插件添加 {get_beijing_time_str('%Y-%m-%d %H:%M')}",
+            "created_at": get_beijing_time_str("%Y-%m-%d %H:%M:%S"),
             "use_count": 0,
             "failure_count": 0,
             "last_error": "",
