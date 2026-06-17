@@ -278,6 +278,10 @@ def normalize_cookie_record(cookie_id: str, cookie_data: Dict[str, Any]) -> Dict
                 cookie_data["created_time"] = int(time.time())
         else:
             cookie_data["created_time"] = int(time.time())
+            
+    cookie_data.setdefault("last_upload_time", cookie_data.get("created_time", 0))
+    cookie_data.setdefault("failed_time", 0)
+
     if cookie_data.get("psid"):
         cookie_data["cookie_id"] = cookie_id
     return cookie_data
@@ -331,6 +335,7 @@ def update_cookie_after_success(cookie_id: str, cookies: Dict[str, str], extra_u
         cookie_data["last_error"] = ""
         cookie_data["last_check_time"] = int(time.time())
         cookie_data["last_refresh_time"] = int(time.time())
+        cookie_data["failed_time"] = 0
         cookie_data["use_count"] = cookie_data.get("use_count", 0) + 1
         if extra_updates:
             cookie_data.update(extra_updates)
@@ -741,6 +746,9 @@ def mark_cookie_failed(cookie_id: str, error: str = ""):
         data = load_data()
         if cookie_id in data["cookies"]:
             normalize_cookie_record(cookie_id, data["cookies"][cookie_id])
+            # 如果之前状态不是失效，这是刚被检测为失效，我们记录失效时间
+            if data["cookies"][cookie_id]["status"] != "失效":
+                data["cookies"][cookie_id]["failed_time"] = int(time.time())
             data["cookies"][cookie_id]["status"] = "失效"
             data["cookies"][cookie_id]["failure_count"] = data["cookies"][cookie_id].get("failure_count", 0) + 1
             data["cookies"][cookie_id]["cooldown_until"] = int(time.time()) + COOKIE_COOLDOWN_SECONDS
@@ -892,7 +900,9 @@ def api_list_cookies(_: str = Depends(verify_admin_token)):
             "email": cookie_data.get("email", "未知账户"),
             "tier": cookie_data.get("tier", "未知"),
             "last_check_time": cookie_data.get("last_check_time", 0),
-            "last_refresh_time": cookie_data.get("last_refresh_time", 0)
+            "last_refresh_time": cookie_data.get("last_refresh_time", 0),
+            "last_upload_time": cookie_data.get("last_upload_time", cookie_data.get("created_time", 0)),
+            "failed_time": cookie_data.get("failed_time", 0)
         })
     return {"success": True, "data": data}
 
@@ -950,7 +960,9 @@ def api_add_cookie(req: AddCookieRequest, _: str = Depends(verify_admin_token)):
         "last_check_time": int(time.time()),
         "cooldown_until": 0,
         "note": req.note,
-        "created_time": int(time.time())
+        "created_time": int(time.time()),
+        "last_upload_time": int(time.time()),
+        "failed_time": 0
     }
     save_data(data)
     
@@ -1124,6 +1136,8 @@ def api_plugin_update_cookie(req: PluginCookieUpdate, _: str = Depends(verify_pl
         data["cookies"][existing_id]["last_refresh_time"] = int(time.time())
         data["cookies"][existing_id]["last_check_time"] = int(time.time())
         data["cookies"][existing_id]["note"] = f"插件更新 {get_beijing_time_str('%Y-%m-%d %H:%M')}"
+        data["cookies"][existing_id]["last_upload_time"] = int(time.time())
+        data["cookies"][existing_id]["failed_time"] = 0
         save_data(data)
         return {"success": True, "message": "Cookie 已更新", "action": "updated", "cookie_id": existing_id}
     else:
@@ -1141,7 +1155,9 @@ def api_plugin_update_cookie(req: PluginCookieUpdate, _: str = Depends(verify_pl
             "last_error": "",
             "last_refresh_time": int(time.time()),
             "last_check_time": int(time.time()),
-            "cooldown_until": 0
+            "cooldown_until": 0,
+            "last_upload_time": int(time.time()),
+            "failed_time": 0
         }
         save_data(data)
         return {"success": True, "message": "Cookie 已添加", "action": "added", "cookie_id": cookie_id}

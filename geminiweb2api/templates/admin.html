@@ -893,8 +893,18 @@
                 }
 
                 let keepAliveText = '-';
-                if (c.created_time && c.last_refresh_time && c.last_refresh_time > c.created_time) {
-                    const diffSec = c.last_refresh_time - c.created_time;
+                let diffSec = 0;
+                if (c.status === '失效') {
+                    if (c.failed_time && c.last_upload_time && c.failed_time > c.last_upload_time) {
+                        diffSec = c.failed_time - c.last_upload_time;
+                    }
+                } else {
+                    if (c.last_refresh_time && c.last_upload_time && c.last_refresh_time > c.last_upload_time) {
+                        diffSec = c.last_refresh_time - c.last_upload_time;
+                    }
+                }
+                
+                if (diffSec > 0) {
                     const mins = Math.floor(diffSec / 60);
                     if (mins < 60) {
                         keepAliveText = `${mins}分钟`;
