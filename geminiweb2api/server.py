@@ -1315,6 +1315,21 @@ def run_gemini_request(
                     last_error=f"Usage limit exceeded: {str(e)[:200]}",
                     last_check_time=int(time.time())
                 )
+            
+            # 检测是否由于安全风控、拦截或未正常响应导致解析失败
+            is_safety_or_parse_error = any(kw in error_msg for kw in [
+                "failed to locate main response body", 
+                "no valid json data found in response",
+                "invalid response format"
+            ])
+            if is_safety_or_parse_error:
+                # 提示词被安全风控阻断时，不标记 Cookie 失效，也不重试切换，直接友好告知客户端
+                print(f"Request blocked or parsing failed for cookie {cookie_id[:8]}... (Likely Google Safety Block): {e}")
+                raise HTTPException(
+                    status_code=400, 
+                    detail="请求失败。该提问内容可能触发了 Google Gemini 网页端的内容安全过滤器（Safety Filter）或敏感指令过滤，已被安全阻断，请尝试修改提示词重新发送。"
+                )
+
             # 任何网络错误、超时、连接被重置，或者含有授权/过期相关的特定错误，均触发重试
             is_network_error = isinstance(e, requests.RequestException) or any(
                 kw in error_msg for kw in ["timeout", "connection", "proxy", "eof", "reset", "handshake"]
